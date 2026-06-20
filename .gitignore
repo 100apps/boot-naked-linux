@@ -1,0 +1,16 @@
+# 构建产物
+Image
+vmlinux
+init-debug
+initrd
+linux-src/
+build/
+
+# macOS
+.DS_Store
+._*
+
+# 编辑器
+*.swp
+*.swo
+*~

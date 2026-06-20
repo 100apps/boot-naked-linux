@@ -1,0 +1,34 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Linux Kernel",
+            "type": "gdb",
+            "request": "attach",
+            "executable": "${workspaceFolder}/vmlinux",
+            "target": "localhost:1234",
+            "remote": true,
+            "cwd": "${workspaceFolder}",
+            "gdbpath": "/opt/homebrew/bin/aarch64-elf-gdb",
+            "autorun": [
+                "source ${workspaceFolder}/.gdbinit",
+                "break start_kernel"
+            ],
+            "preLaunchTask": "Start QEMU (debug mode)"
+        },
+        {
+            "name": "Debug Linux Kernel (Attach)",
+            "type": "gdb",
+            "request": "attach",
+            "executable": "${workspaceFolder}/vmlinux",
+            "target": "localhost:1234",
+            "remote": true,
+            "cwd": "${workspaceFolder}",
+            "gdbpath": "/opt/homebrew/bin/aarch64-elf-gdb",
+            "autorun": [
+                "source ${workspaceFolder}/.gdbinit",
+                "break start_kernel"
+            ]
+        }
+    ]
+}

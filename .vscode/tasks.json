@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start QEMU (debug mode)",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/start-qemu-debug.sh",
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^ERROR",
+                    "file": 1,
+                    "line": 2,
+                    "message": 0
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*QEMU.*",
+                    "endsPattern": "^QEMU GDB server ready"
+                }
+            },
+            "presentation": {
+                "label": "QEMU",
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "Stop QEMU",
+            "type": "shell",
+            "command": "pkill -f 'qemu-system-aarch64.*-gdb tcp::1234' || true",
+            "presentation": {
+                "reveal": "silent"
+            }
+        },
+        {
+            "label": "Rebuild Kernel (Docker)",
+            "type": "shell",
+            "command": "${workspaceFolder}/boot-naked-linux.sh build",
+            "group": "build",
+            "presentation": {
+                "reveal": "always"
+            }
+        }
+    ]
+}

@@ -1,0 +1,23 @@
+{
+    "files.exclude": {
+        "linux-src/Documentation/**": true,
+        "linux-src/tools/**": true,
+        "linux-src/samples/**": true,
+        "linux-src/scripts/**": true
+    },
+    "files.watcherExclude": {
+        "linux-src/**": true
+    },
+    "search.exclude": {
+        "linux-src/Documentation/**": true,
+        "linux-src/tools/**": true
+    },
+    "C_Cpp.default.compileCommands": "",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/linux-src/include",
+        "${workspaceFolder}/linux-src/arch/arm64/include",
+        "${workspaceFolder}/linux-src/include/uapi",
+        "${workspaceFolder}/linux-src/arch/arm64/include/uapi",
+        "${workspaceFolder}/linux-src/include/generated"
+    ]
+}
