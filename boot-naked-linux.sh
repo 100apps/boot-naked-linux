@@ -14,7 +14,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KERNEL_VERSION="${KERNEL_VERSION:-6.12.8}"
 
 # ----------------------------------------------------------------
 # 依赖检查
@@ -53,12 +52,12 @@ do_build() {
     check_deps
 
     echo "=== Boot Naked Linux Builder ==="
-    echo "内核版本: $KERNEL_VERSION"
+    echo "内核版本: mainline latest"
     echo ""
 
     echo "[1/3] 使用 Docker 编译内核（首次约 5-10 分钟）..."
     docker build --platform linux/arm64 \
-        --build-arg KERNEL_VERSION="$KERNEL_VERSION" \
+        --build-arg CACHEBUST="$(date +%s)" \
         -t boot-naked-linux "$SCRIPT_DIR"
 
     echo ""
@@ -110,7 +109,9 @@ do_run() {
         -kernel "$SCRIPT_DIR/Image" \
         -initrd "$SCRIPT_DIR/initrd" \
         -append "console=ttyAMA0" \
-        -no-reboot
+        -no-reboot \
+        -netdev user,id=net0 \
+        -device virtio-net-pci,netdev=net0
 }
 
 # ----------------------------------------------------------------
@@ -143,6 +144,8 @@ do_debug() {
         -initrd "$SCRIPT_DIR/initrd" \
         -append "console=ttyAMA0 nokaslr" \
         -no-reboot \
+        -netdev user,id=net0 \
+        -device virtio-net-pci,netdev=net0 \
         -S -gdb tcp::1234
 }
 

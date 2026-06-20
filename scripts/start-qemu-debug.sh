@@ -16,6 +16,8 @@ qemu-system-aarch64 \
     -initrd "$PROJECT_DIR/initrd" \
     -append "console=ttyAMA0 nokaslr" \
     -no-reboot \
+    -netdev user,id=net0 \
+    -device virtio-net-pci,netdev=net0 \
     -S -gdb tcp::1234 &
 
 QEMU_PID=$!

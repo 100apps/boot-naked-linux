@@ -5,7 +5,7 @@
 适合想理解 Linux 内核启动原理的开发者。你可以用 VSCode 单步跟踪内核从第一行代码到执行你的 init 程序的全过程。
 
 ```
-内核 3 MB + init 274 KB → 100ms 内完成启动
+内核 4.5 MB + init 295 KB → 启动并发出 HTTP 请求
 ```
 
 > 基于 [Boot a Naked Linux](https://nick.zoic.org/art/boot-naked-linux/)，适配 Apple Silicon Mac + VSCode 调试。
@@ -195,25 +195,69 @@ run_init_process("/init")
 
 ### 第五站：你的 init 程序
 
-**文件：** `init.c:5`
+**文件：** `init.c`
 
 ```
 break main → F5 继续
 ```
 
-```c
-int main(int argc, char **argv) {
-    fprintf(stderr, "Hello from init.c!\n");  // ← 你在这里
-    reboot(RB_POWER_OFF);                     // 系统调用 → 内核执行关机
-}
+init 程序会配置网络、发一个 HTTP GET 请求到 httpbin.org，然后关机。你可以在 `setup_network()`、`do_http_request()` 上设断点，单步看每一步。
+
+**动手试：** 单步到 `connect()` 调用前暂停，在 GDB 中查看 `sockfd` 的值——这就是内核为你创建的 socket 文件描述符。
+
+### 第六站：跟踪一个 HTTP 请求穿越内核网络栈
+
+这是最精彩的部分——你可以用断点跟踪一个 HTTP 请求从用户态 `connect()` 到网卡发出 SYN 包的完整路径。
+
+**在 GDB 控制台中依次设置这些断点：**
+
+```
+break tcp_v4_connect
+break ip_output
+break __dev_queue_xmit
+break ip_rcv
+break tcp_v4_rcv
+continue
 ```
 
-**动手试：** 单步到 `reboot()` 前暂停，在 GDB 中查看：
+**发送路径（你的 `connect()` → SYN 包从网卡发出）：**
+
 ```
-print argc          → 2
-print argv[0]       → "/init"
+connect()                         ← 用户态系统调用
+└── __sys_connect()               ← 内核态入口
+    └── tcp_v4_connect()          ← TCP 层：构造 SYN 包
+        └── ip_output()           ← IP 层：加 IP 头，查路由表
+            └── __dev_queue_xmit() ← 设备层：推入网卡发送队列
+                └── virtio-net    ← 驱动层：通过 virtio 发给 QEMU
 ```
-这就是内核传给你的 init 进程的参数。
+
+**接收路径（SYN-ACK 从网卡 → 你的 `connect()` 返回）：**
+
+```
+virtio-net 中断               ← 网卡收到 SYN-ACK
+└── ip_rcv()                   ← IP 层：解析 IP 头，判断协议
+    └── tcp_v4_rcv()           ← TCP 层：匹配到 socket，更新状态
+        └── tcp_v4_do_rcv()    ← 三次握手完成，connect() 返回 0
+```
+
+**动手试：**
+
+1. 断在 `tcp_v4_connect` 后执行 `bt`，你会看到从 `__sys_connect` 到 TCP 层的完整调用栈
+2. 断在 `ip_output` 时执行 `print skb->len`，看 SYN 包的大小
+3. 断在 `tcp_v4_rcv` 时你正在处理从 httpbin.org 返回的 SYN-ACK
+4. 继续执行，下一次 `tcp_v4_rcv` 就是 HTTP 响应数据
+
+### 网络栈关键函数速查
+
+| 层 | 函数 | 文件 | 说明 |
+|----|------|------|------|
+| **系统调用** | `__sys_socket()` | `net/socket.c:1711` | 创建 socket |
+| **TCP 发送** | `tcp_v4_connect()` | `net/ipv4/tcp_ipv4.c:218` | 发起三次握手 |
+| | `tcp_sendmsg()` | `net/ipv4/tcp.c:1352` | 应用数据 → TCP 发送缓冲区 |
+| **IP 层** | `ip_output()` | `net/ipv4/ip_output.c:427` | 加 IP 头，发出去 |
+| | `ip_rcv()` | `net/ipv4/ip_input.c:560` | 收到 IP 包，分发到上层协议 |
+| **TCP 接收** | `tcp_v4_rcv()` | `net/ipv4/tcp_ipv4.c:2177` | 收到 TCP 段，匹配 socket |
+| **设备层** | `__dev_queue_xmit()` | `net/core/dev.c:4340` | 推入网卡发送队列 |
 
 ### 完整启动路径速查
 
@@ -250,6 +294,8 @@ CPU 上电 → head.S (汇编) → start_kernel()
 | **设备模型** | `driver_init()` | `drivers/base/init.c` | 建立 `/sys` 的设备树结构 |
 | **时钟** | `timekeeping_init()` | `kernel/time/timekeeping.c` | 初始化系统时钟源 |
 | **控制台** | `console_init()` | `kernel/printk/printk.c` | 注册控制台设备，积压的日志在此刻输出 |
+| **网络栈** | `tcp_v4_connect()` | `net/ipv4/tcp_ipv4.c` | TCP 连接发起，三次握手从这里开始 |
+| **IP 协议** | `ip_rcv()` / `ip_output()` | `net/ipv4/ip_input.c` | IP 包的收发入口 |
 
 ---
 

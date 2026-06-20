@@ -57,6 +57,23 @@ enable_config CONFIG_ARCH_VIRT y
 enable_config CONFIG_SMP
 enable_config CONFIG_NR_CPUS 4
 
+# 网络栈
+enable_config CONFIG_NET y
+enable_config CONFIG_INET y
+enable_config CONFIG_TCP_CONG_CUBIC y
+enable_config CONFIG_DEFAULT_TCP_CONG '"cubic"'
+enable_config CONFIG_PACKET y
+enable_config CONFIG_UNIX y
+enable_config CONFIG_NETDEVICES y
+enable_config CONFIG_NET_CORE y
+enable_config CONFIG_ETHERNET y
+enable_config CONFIG_VIRTIO_NET y
+
+# proc/sysfs（网络栈依赖）
+enable_config CONFIG_PROC_FS y
+enable_config CONFIG_PROC_SYSCTL y
+enable_config CONFIG_SYSFS y
+
 # 调试支持
 enable_config CONFIG_DEBUG_INFO y
 enable_config CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT y
@@ -65,4 +82,17 @@ enable_config CONFIG_DEBUG_KERNEL y
 enable_config CONFIG_FRAME_POINTER y
 enable_config CONFIG_RANDOMIZE_BASE n
 
+make olddefconfig
+
+# olddefconfig 可能因依赖关系关掉某些选项，再确认一次
+enable_config CONFIG_VIRTIO y
+enable_config CONFIG_VIRTIO_MENU y
+enable_config CONFIG_VIRTIO_PCI y
+enable_config CONFIG_VIRTIO_PCI_MODERN y
+enable_config CONFIG_VIRTIO_MMIO y
+enable_config CONFIG_VIRTIO_RING y
+enable_config CONFIG_NETDEVICES y
+enable_config CONFIG_ETHERNET y
+enable_config CONFIG_NET_CORE y
+enable_config CONFIG_VIRTIO_NET y
 make olddefconfig

@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
     cpio \
     gzip \
     git \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -19,13 +18,12 @@ WORKDIR /build
 COPY init.c /build/init.c
 
 RUN gcc -g -static init.c -o init && \
-    echo 'init' | cpio -o --format=newc | gzip -c > initrd
+    mkdir -p rootfs/dev rootfs/proc rootfs/sys && \
+    cp init rootfs/init && \
+    (cd rootfs && find . | cpio -o --format=newc | gzip -c > /build/initrd)
 
-ARG KERNEL_VERSION=6.12.8
-RUN wget -q https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz && \
-    tar xf linux-${KERNEL_VERSION}.tar.xz && \
-    mv linux-${KERNEL_VERSION} linux && \
-    rm linux-${KERNEL_VERSION}.tar.xz
+ARG CACHEBUST=1
+RUN git clone --depth 1 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 
 WORKDIR /build/linux
 
