@@ -190,17 +190,25 @@ code {
   <li class="indent"><a href="#syscall">1.1 系统调用处理 (System Call Handler)</a></li>
   <li class="indent"><a href="#interrupt">1.2 中断处理 (Interrupt Handler)</a></li>
   <li class="indent"><a href="#exception">1.3 异常处理 (Exception Handler)</a></li>
-  <li class="indent"><a href="#task-struct">1.4 task_struct &mdash; 进程描述符</a></li>
-  <li class="indent"><a href="#mm-struct">1.5 mm_struct &mdash; 内存描述符</a></li>
-  <li class="indent"><a href="#files-struct">1.6 files_struct / fdtable &mdash; 文件描述符表</a></li>
-  <li class="indent"><a href="#struct-file">1.7 struct file &mdash; 文件对象</a></li>
-  <li class="indent"><a href="#struct-sock">1.8 struct sock &mdash; 套接字对象</a></li>
-  <li class="indent"><a href="#struct-skbuff">1.9 struct sk_buff &mdash; 网络缓冲区</a></li>
-  <li class="indent"><a href="#struct-page">1.10 struct page &mdash; 物理页描述符</a></li>
+  <li class="indent"><a href="#data-structures">1.4 核心数据结构总览</a></li>
+  <li class="indent2"><a href="#task-struct">1.4.1 task_struct — 进程描述符</a></li>
+  <li class="indent2"><a href="#mm-struct">1.4.2 mm_struct — 内存描述符</a></li>
+  <li class="indent2"><a href="#files-struct">1.4.3 files_struct — 文件描述符表</a></li>
+  <li class="indent2"><a href="#struct-file">1.4.4 struct file — 文件对象</a></li>
+  <li class="indent2"><a href="#struct-sock">1.4.5 struct sock — 套接字对象</a></li>
+  <li class="indent2"><a href="#struct-skbuff">1.4.6 struct sk_buff — 网络缓冲区</a></li>
+  <li class="indent2"><a href="#struct-page">1.4.7 struct page — 物理页描述符</a></li>
   <li><strong>第二部分：内核 = 裁判 + 管家 + 翻译官</strong></li>
-  <li class="indent"><a href="#referee">2.1 裁判 (Referee) &mdash; 规则与公平</a></li>
-  <li class="indent"><a href="#steward">2.2 管家 (Steward) &mdash; 资源管理</a></li>
-  <li class="indent"><a href="#translator">2.3 翻译官 (Translator) &mdash; 硬件抽象</a></li>
+  <li class="indent"><a href="#referee">2.1 裁判 (Referee) — 规则与公平</a></li>
+  <li class="indent"><a href="#steward">2.2 管家 (Steward) — 资源管理</a></li>
+  <li class="indent"><a href="#translator">2.3 翻译官 (Translator) — 硬件抽象</a></li>
+  <li><strong>第三部分：内核代码量分析 — 27,577,520 行都在干什么</strong></li>
+  <li class="indent"><a href="#overview">3.1 总览</a></li>
+  <li class="indent"><a href="#by-subsystem">3.2 按"事件处理器 vs 数据结构"分类</a></li>
+  <li class="indent"><a href="#by-role">3.3 按"裁判 + 管家 + 翻译官"分类</a></li>
+  <li class="indent"><a href="#breakdown">3.4 各子系统详细分解</a></li>
+  <li class="indent"><a href="#what-they-do">3.5 两个视角的代码行数占比</a></li>
+  <li class="indent"><a href="#boot-naked-linux">3.6 与 boot-naked-linux 项目的联系</a></li>
 </ul>
 </nav>
 
@@ -523,11 +531,11 @@ Parent 写入 Page A:
 </div>
 
 <!-- ==================== DATA STRUCTURES ==================== -->
-<h2 id="data-structures"><span class="tag tag-data">Data</span>核心数据结构总览</h2>
+<h2 id="data-structures"><span class="tag tag-data">Data</span>1.4 核心数据结构总览</h2>
 <p>内核的数据结构围绕 "进程" 这一中心概念组织。每个进程用一个 <code class="inline-code">task_struct</code> 描述，它引用了内存、文件、信号等子系统的数据结构。</p>
 
 <!-- 1.4 task_struct -->
-<h3 id="task-struct">1.4 task_struct &mdash; 进程描述符</h3>
+<h3 id="task-struct">1.4.1 task_struct &mdash; 进程描述符</h3>
 <p class="file-path">linux-src/include/linux/sched.h : 785+</p>
 <p>内核中最重要的数据结构，约 6KB，包含了进程的一切信息。通过 <code class="inline-code">current</code> 宏获取当前进程的 task_struct（存储在 per-CPU 变量或 thread_info 中）。</p>
 
@@ -566,7 +574,7 @@ Parent 写入 Page A:
 </div>
 
 <!-- 1.5 mm_struct -->
-<h3 id="mm-struct">1.5 mm_struct &mdash; 内存描述符</h3>
+<h3 id="mm-struct">1.4.2 mm_struct &mdash; 内存描述符</h3>
 <p class="file-path">linux-src/include/linux/mm_types.h : 790+</p>
 <p>描述一个进程的虚拟地址空间布局。每个进程有且仅有一个 mm_struct（CLONE_VM 共享除外）。</p>
 
@@ -609,7 +617,7 @@ Parent 写入 Page A:
 </div>
 
 <!-- 1.6 files_struct -->
-<h3 id="files-struct">1.6 files_struct / fdtable &mdash; 文件描述符表</h3>
+<h3 id="files-struct">1.4.3 files_struct / fdtable &mdash; 文件描述符表</h3>
 <p class="file-path">linux-src/include/linux/fdtable.h</p>
 
 <pre>
@@ -651,7 +659,7 @@ int get_unused_fd_flags(unsigned flags)
 </div>
 
 <!-- 1.7 struct file -->
-<h3 id="struct-file">1.7 struct file &mdash; 文件对象</h3>
+<h3 id="struct-file">1.4.4 struct file &mdash; 文件对象</h3>
 <p class="file-path">linux-src/include/linux/fs.h : 1032+</p>
 <p>每次 <code class="inline-code">open()</code> 创建一个 struct file，代表一次 "打开的文件实例"。多个 fd 可以指向同一个 struct file（dup/dup2），多个 struct file 可以指向同一个 inode。</p>
 
@@ -669,7 +677,7 @@ int get_unused_fd_flags(unsigned flags)
 </table>
 
 <!-- 1.8 struct sock -->
-<h3 id="struct-sock">1.8 struct sock &mdash; 套接字对象</h3>
+<h3 id="struct-sock">1.4.5 struct sock &mdash; 套接字对象</h3>
 <p class="file-path">linux-src/include/net/sock.h : 342+</p>
 <p>网络协议层的通用套接字表示。TCP/UDP/Unix domain socket 都继承此结构（通过嵌入或容器继承）。</p>
 
@@ -688,7 +696,7 @@ int get_unused_fd_flags(unsigned flags)
 </table>
 
 <!-- 1.9 sk_buff -->
-<h3 id="struct-skbuff">1.9 struct sk_buff &mdash; 网络缓冲区</h3>
+<h3 id="struct-skbuff">1.4.6 struct sk_buff &mdash; 网络缓冲区</h3>
 <p class="file-path">linux-src/include/linux/skbuff.h : 866+</p>
 <p>网络栈的核心数据包载体。每一层协议都在 sk_buff 中添加或剥离头部，数据本身不会被拷贝（零拷贝设计）。</p>
 
@@ -740,7 +748,7 @@ int get_unused_fd_flags(unsigned flags)
 </div>
 
 <!-- 1.10 struct page -->
-<h3 id="struct-page">1.10 struct page &mdash; 物理页描述符</h3>
+<h3 id="struct-page">1.4.7 struct page &mdash; 物理页描述符</h3>
 <p class="file-path">linux-src/include/linux/mm_types.h : 72+</p>
 <p>系统中每个物理页都有一个对应的 struct page。对于 4GB 内存、4KB 页大小，约有 1M 个 struct page，占用约 64MB。</p>
 
