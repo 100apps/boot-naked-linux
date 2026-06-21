@@ -1431,47 +1431,114 @@ QEMU 模拟的 virtio-net/virtio-blk 展示了翻译官角色的实际效果：
 </div>
 </div>
 
-<h2 id="by-subsystem"><span class="tag tag-data">Data</span>3.2 按子系统分类</h2>
+<h2 id="by-subsystem"><span class="tag tag-data">Data</span>3.2 按"事件处理器 vs 数据结构"分类</h2>
+
+<div class="card" style="margin-bottom: 20px;">
+<h4>两种视角：Handler (事件处理器) + Data (数据结构)</h4>
+<pre>
+<span class="comment">/* 内核代码可以按两种视角来理解：</span>
+<span class="comment"> *</span>
+<span class="comment"> * 视角一：事件处理器 (Handler) — 被触发时执行的代码</span>
+<span class="comment"> *   系统调用入口、中断处理、异常处理</span>
+<span class="comment"> *   特点：代码量极少 (~0.1%)，但定义了内核的"入口"</span>
+<span class="comment"> *</span>
+<span class="comment"> * 视角二：数据结构 (Data) — 组织和管理系统状态的代码</span>
+<span class="comment"> *   进程管理、内存管理、文件系统、网络栈、设备驱动</span>
+<span class="comment"> *   特点：代码量巨大 (~99.9%)，定义了内核的"内容"</span>
+<span class="comment"> */</span>
+</pre>
+</div>
 
 <div class="cards-grid">
 <div class="card highlight-green">
-<h4>按事件处理 / 数据结构分类</h4>
+<h4>事件处理器 (Handler) — 三种入口</h4>
 <table class="struct-table">
-<tr><th>类别</th><th>子系统</th><th>行数</th><th>占比</th><th>角色</th></tr>
-<tr><td class="field-name" rowspan="3">事件处理器</td>
-<td class="field-name">系统调用入口</td><td class="number">~12,000</td><td class="field-desc">0.04%</td><td>arch/arm64/kernel/syscall.c + sys.c</td></tr>
-<tr><td class="field-name">中断处理</td><td class="number">~15,000</td><td class="field-desc">0.05%</td><td>kernel/irq/ + drivers/irqchip/</td></tr>
-<tr><td class="field-name">异常处理</td><td class="number">~7,500</td><td class="field-desc">0.03%</td><td>mm/memory.c (缺页处理)</td></tr>
-<tr><td class="field-name" rowspan="7">数据结构</td>
-<td class="field-name">task_struct (进程)</td><td class="number">~524,000</td><td class="field-desc">1.9%</td><td>kernel/ 全部 C 代码</td></tr>
-<tr><td class="field-name">mm_struct (内存)</td><td class="number">~214,000</td><td class="field-desc">0.8%</td><td>mm/ 全部 (缺页、分配器、交换)</td></tr>
-<tr><td class="field-name">files_struct (文件)</td><td class="number">~1,464,000</td><td class="field-desc">5.3%</td><td>fs/ 全部 (VFS + 各文件系统)</td></tr>
-<tr><td class="field-name">struct sock (网络)</td><td class="number">~1,233,000</td><td class="field-desc">4.5%</td><td>net/ 全部 (TCP/IP + 协议栈)</td></tr>
-<tr><td class="field-name">struct page (物理页)</td><td class="number">~214,000</td><td class="field-desc">0.8%</td><td>mm/ (含在 mm 统计中)</td></tr>
-<tr><td class="field-name">sk_buff (网络缓冲)</td><td class="number">~1,233,000</td><td class="field-desc">4.5%</td><td>net/ (含在 net 统计中)</td></tr>
-<tr><td class="field-name">block_device (块设备)</td><td class="number">~67,000</td><td class="field-desc">0.2%</td><td>block/ + drivers/block/</td></tr>
+<tr><th>入口类型</th><th>触发方式</th><th>代码位置</th><th>代码量</th></tr>
+<tr><td class="field-name">系统调用</td><td class="field-desc">用户态 svc 指令</td><td class="field-desc">arch/arm64/kernel/syscall.c + sys.c</td><td class="number">~12,000</td></tr>
+<tr><td class="field-name">硬件中断</td><td class="field-desc">GIC 中断控制器触发</td><td class="field-desc">kernel/irq/ + drivers/irqchip/</td><td class="number">~15,000</td></tr>
+<tr><td class="field-name">异常 (缺页等)</td><td class="field-desc">CPU 异常触发</td><td class="field-desc">mm/memory.c (do_page_fault)</td><td class="number">~7,500</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">Handler 合计</td><td></td><td></td><td class="number">~34,500</td></tr>
 </table>
 </div>
 
 <div class="card highlight-blue">
-<h4>按裁判 / 管家 / 翻译官分类</h4>
+<h4>数据结构 (Data) — 七大核心子系统</h4>
 <table class="struct-table">
-<tr><th>角色</th><th>子系统</th><th>行数</th><th>占比</th></tr>
-<tr><td class="field-name" rowspan="3">裁判</td><td class="field-name">调度器 (kernel/sched/)</td><td class="number">~64,000</td><td class="field-desc">0.2%</td></tr>
-<tr><td class="field-name">安全 (security/)</td><td class="number">~114,000</td><td class="field-desc">0.4%</td></tr>
-<tr><td class="field-name">锁 (kernel/locking/)</td><td class="number">~19,000</td><td class="field-desc">0.07%</td></tr>
-<tr><td class="field-name" rowspan="4">管家</td><td class="field-name">内存分配 (mm/page_alloc + slub + vmalloc)</td><td class="number">~23,000</td><td class="field-desc">0.08%</td></tr>
-<tr><td class="field-name">进程管理 (fork/exit/pid)</td><td class="number">~9,500</td><td class="field-desc">0.03%</td></tr>
-<tr><td class="field-name">信号 (kernel/signal.c)</td><td class="number">~5,000</td><td class="field-desc">0.02%</td></tr>
-<tr><td class="field-name">时间 (kernel/time/)</td><td class="number">~27,000</td><td class="field-desc">0.1%</td></tr>
-<tr><td class="field-name" rowspan="3">翻译官</td><td class="field-name">VFS (fs/namei + open + read_write + ...)</td><td class="number">~29,000</td><td class="field-desc">0.1%</td></tr>
-<tr><td class="field-name">块层 (block/)</td><td class="number">~67,000</td><td class="field-desc">0.2%</td></tr>
-<tr><td class="field-name">驱动 (drivers/ 全部)</td><td class="number">~836,000</td><td class="field-desc">3.0%</td></tr>
+<tr><th>核心数据结构</th><th>对应子系统</th><th>代码量</th><th>说明</th></tr>
+<tr><td class="field-name">task_struct</td><td class="field-desc">kernel/ (进程管理)</td><td class="number">524,108</td><td class="field-desc">调度、fork、信号、锁、时间</td></tr>
+<tr><td class="field-name">mm_struct</td><td class="field-desc">mm/ (内存管理)</td><td class="number">214,046</td><td class="field-desc">缺页、Buddy、SLUB、交换</td></tr>
+<tr><td class="field-name">files_struct / file</td><td class="field-desc">fs/ (文件系统)</td><td class="number">1,463,718</td><td class="field-desc">VFS + 40+ 种文件系统</td></tr>
+<tr><td class="field-name">struct sock / sk_buff</td><td class="field-desc">net/ (网络栈)</td><td class="number">1,233,487</td><td class="field-desc">TCP/IP + 30+ 种协议族</td></tr>
+<tr><td class="field-name">block_device</td><td class="field-desc">block/ (块层)</td><td class="number">67,409</td><td class="field-desc">IO 调度器、bio 管理</td></tr>
+<tr><td class="field-name">crypto 相关</td><td class="field-desc">crypto/ (加密)</td><td class="number">64,685</td><td class="field-desc">AES、SHA、RSA 等</td></tr>
+<tr><td class="field-name">IPC 对象</td><td class="field-desc">ipc/ + lib/</td><td class="number">271,419</td><td class="field-desc">SysV IPC + 内核库函数</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">Data 合计</td><td></td><td class="number">~3,838,872</td><td></td></tr>
 </table>
 </div>
 </div>
 
-<h2 id="breakdown"><span class="tag tag-referee">Detail</span>3.3 各子系统详细分解</h2>
+<h2 id="by-role"><span class="tag tag-data">Data</span>3.3 按"裁判 + 管家 + 翻译官"分类</h2>
+
+<div class="card" style="margin-bottom: 20px;">
+<h4>三种角色：Referee (裁判) + Steward (管家) + Translator (翻译官)</h4>
+<pre>
+<span class="comment">/* 内核代码按"角色"可以分成三类：</span>
+<span class="comment"> *</span>
+<span class="comment"> * 裁判 (Referee) — 制定和执行规则，保证公平与安全</span>
+<span class="comment"> *   调度器、权限控制、锁、信号</span>
+<span class="comment"> *   特点：代码量极少 (~0.7%)，但决策权最大</span>
+<span class="comment"> *</span>
+<span class="comment"> * 管家 (Steward) — 管理资源，分配与回收</span>
+<span class="comment"> *   内存分配器、进程 fork/exit、时间管理、cgroup</span>
+<span class="comment"> *   特点：代码量适中 (~0.9%)，是关键基础设施</span>
+<span class="comment"> *</span>
+<span class="comment"> * 翻译官 (Translator) — 硬件抽象，统一接口</span>
+<span class="comment"> *   文件系统、网络栈、设备驱动、架构适配</span>
+<span class="comment"> *   特点：代码量巨大 (~48%)，是内核的主体</span>
+<span class="comment"> */</span>
+</pre>
+</div>
+
+<div class="cards-grid">
+<div class="card highlight-red">
+<h4>裁判 (Referee)</h4>
+<table class="struct-table">
+<tr><th>模块</th><th>代码量</th><th>职责</th></tr>
+<tr><td class="field-name">调度器 (kernel/sched/)</td><td class="number">63,918</td><td class="field-desc">CFS 公平调度，决定谁用 CPU</td></tr>
+<tr><td class="field-name">安全 (security/)</td><td class="number">113,834</td><td class="field-desc">SELinux/AppArmor，访问控制</td></tr>
+<tr><td class="field-name">锁 (kernel/locking/)</td><td class="number">18,602</td><td class="field-desc">自旋锁、互斥锁、RCU</td></tr>
+<tr><td class="field-name">信号 (kernel/signal.c)</td><td class="number">5,054</td><td class="field-desc">进程间异步通知</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">裁判合计</td><td class="number">~201,408</td><td></td></tr>
+</table>
+</div>
+
+<div class="card highlight-green">
+<h4>管家 (Steward)</h4>
+<table class="struct-table">
+<tr><th>模块</th><th>代码量</th><th>职责</th></tr>
+<tr><td class="field-name">内存分配 (mm/page_alloc + slub + vmalloc)</td><td class="number">23,463</td><td class="field-desc">Buddy + SLUB + vmalloc 三大分配器</td></tr>
+<tr><td class="field-name">进程管理 (fork/exit/pid)</td><td class="number">9,488</td><td class="field-desc">copy_process、进程销毁、PID 分配</td></tr>
+<tr><td class="field-name">时间管理 (kernel/time/)</td><td class="number">26,979</td><td class="field-desc">高精度定时器、时钟事件</td></tr>
+<tr><td class="field-name">中断管理 (kernel/irq/)</td><td class="number">15,005</td><td class="field-desc">IRQ 域、中断控制器抽象</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">管家合计</td><td class="number">~74,935</td><td></td></tr>
+</table>
+</div>
+
+<div class="card highlight-blue">
+<h4>翻译官 (Translator)</h4>
+<table class="struct-table">
+<tr><th>模块</th><th>代码量</th><th>职责</th></tr>
+<tr><td class="field-name">文件系统 (fs/)</td><td class="number">1,463,718</td><td class="field-desc">VFS + 40+ 种文件系统实现</td></tr>
+<tr><td class="field-name">网络栈 (net/)</td><td class="number">1,233,487</td><td class="field-desc">socket API + TCP/IP + 30+ 协议族</td></tr>
+<tr><td class="field-name">块层 (block/)</td><td class="number">67,409</td><td class="field-desc">IO 调度器、bio 管理</td></tr>
+<tr><td class="field-name">驱动 (drivers/)</td><td class="number">8,000,000+</td><td class="field-desc">网卡、显卡、USB、存储、PCI 等所有设备</td></tr>
+<tr><td class="field-name">架构适配 (arch/)</td><td class="number">2,500,000+</td><td class="field-desc">arm64、x86_64、RISC-V 等架构代码</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">翻译官合计</td><td class="number">~13,264,614</td><td></td></tr>
+</table>
+</div>
+</div>
+
+<h2 id="breakdown"><span class="tag tag-referee">Detail</span>3.4 各子系统详细分解</h2>
 
 <div class="cards-grid">
 <div class="card highlight-green">
@@ -1590,7 +1657,7 @@ QEMU 模拟的 virtio-net/virtio-blk 展示了翻译官角色的实际效果：
 </div>
 </div>
 
-<h2 id="what-they-do"><span class="tag tag-translator">Summary</span>3.4 三个视角的代码行数占比</h2>
+<h2 id="what-they-do"><span class="tag tag-translator">Summary</span>3.5 两个视角的代码行数占比</h2>
 
 <div class="cards-grid">
 <div class="card highlight-green">
@@ -1671,7 +1738,7 @@ QEMU 模拟的 virtio-net/virtio-blk 展示了翻译官角色的实际效果：
 </div>
 </div>
 
-<h2 id="boot-naked-linux"><span class="tag tag-handler">Project</span>3.5 与 boot-naked-linux 项目的联系</h2>
+<h2 id="boot-naked-linux"><span class="tag tag-handler">Project</span>3.6 与 boot-naked-linux 项目的联系</h2>
 
 <div class="card" style="border-color: #58a6ff;">
 <h4 style="color:#58a6ff;">你的项目启用了哪些代码？</h4>
