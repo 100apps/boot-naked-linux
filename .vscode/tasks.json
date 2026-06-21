@@ -28,7 +28,7 @@
         {
             "label": "Stop QEMU",
             "type": "shell",
-            "command": "pkill -f 'qemu-system-aarch64.*-gdb tcp::1234' || true",
+            "command": "source ${workspaceFolder}/scripts/platform.sh && detect_platform && pkill -f \"$QEMU_BIN.*-gdb tcp::1234\" || true",
             "presentation": {
                 "reveal": "silent"
             }

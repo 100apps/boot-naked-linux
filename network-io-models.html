@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux 网络 I/O 模型调用链路对比</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 30px;
+  line-height: 1.5;
+}
+h1 { color: #58a6ff; font-size: 24px; margin-bottom: 8px; }
+h2 { color: #58a6ff; font-size: 18px; margin: 30px 0 12px; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
+.subtitle { color: #8b949e; font-size: 13px; margin-bottom: 30px; }
+
+/* 5 列布局 */
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 30px;
+}
+.model-col {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+}
+.model-col h3 {
+  font-size: 13px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #21262d;
+}
+.model-col.highlight { border-color: #58a6ff; }
+.model-col.highlight h3 { color: #58a6ff; }
+
+/* 调用链路样式 */
+.call-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.call-node {
+  padding: 4px 8px;
+  margin: 1px 0;
+  border-radius: 3px;
+  font-size: 11px;
+  position: relative;
+}
+.call-node::before {
+  content: '│';
+  position: absolute;
+  left: 2px;
+  top: -2px;
+  color: #30363d;
+  font-size: 10px;
+}
+.call-node:first-child::before { display: none; }
+.call-node.user   { background: #1a3a1a; color: #7ee787; }
+.call-node.syscall{ background: #1a2a3a; color: #79c0ff; }
+.call-node.kernel { background: #3a1a2a; color: #f778ba; }
+.call-node.driver { background: #3a3a1a; color: #e3b341; }
+.call-node.label  { background: transparent; color: #8b949e; font-size: 10px; font-style: italic; }
+.call-node.label::before { display: none; }
+.call-node.arrow  { background: transparent; color: #484f58; text-align: center; font-size: 10px; }
+.call-node.arrow::before { display: none; }
+
+/* 对比表 */
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  font-size: 13px;
+}
+.compare-table th {
+  background: #161b22;
+  color: #58a6ff;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid #30363d;
+  position: sticky;
+  top: 0;
+}
+.compare-table td {
+  padding: 8px 12px;
+  border: 1px solid #30363d;
+  vertical-align: top;
+}
+.compare-table tr:nth-child(even) td { background: #161b22; }
+.compare-table .yes { color: #7ee787; }
+.compare-table .no  { color: #f85149; }
+.compare-table .partial { color: #e3b341; }
+
+/* 内核机制图 */
+.mechanism {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+  overflow-x: auto;
+}
+.mechanism pre {
+  color: #c9d1d9;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre;
+}
+.mechanism .hl { color: #58a6ff; }
+.mechanism .kw { color: #f778ba; }
+.mechanism .fn { color: #7ee787; }
+.mechanism .co { color: #8b949e; }
+
+/* 响应式 */
+@media (max-width: 1200px) {
+  .models-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 800px) {
+  .models-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<h1>Linux 网络 I/O 模型调用链路对比</h1>
+<p class="subtitle">基于 boot-naked-linux 项目 — 内核版本 7.1.0+ (arm64), QEMU virt + virtio-net</p>
+
+<!-- ================================================================ -->
+<h2>一、全链路并排对比</h2>
+
+<div class="models-grid">
+
+<!-- Blocking -->
+<div class="model-col highlight">
+<h3>1. Blocking I/O</h3>
+<div class="call-chain">
+<div class="call-node user">connect()</div>
+<div class="call-node syscall">__arm64_sys_connect</div>
+<div class="call-node syscall">__sys_connect</div>
+<div class="call-node kernel">inet_stream_connect</div>
+<div class="call-node kernel">__inet_stream_connect</div>
+<div class="call-node kernel">tcp_v4_connect() → SYN</div>
+<div class="call-node kernel">inet_wait_for_connect</div>
+<div class="call-node label">  add_wait_queue(sk_sleep)</div>
+<div class="call-node label">  schedule() ← 进程睡眠</div>
+<div class="call-node arrow">... 软中断: NAPI → tcp_v4_rcv → SYN-ACK ...</div>
+<div class="call-node label">  wake_up() ← 进程唤醒</div>
+<div class="call-node kernel">tcp_set_state(ESTABLISHED)</div>
+<div class="call-node user">connect() 返回 0</div>
+<div class="call-node user">write()</div>
+<div class="call-node syscall">__arm64_sys_write</div>
+<div class="call-node kernel">tcp_sendmsg() → 数据包</div>
+<div class="call-node user">read()</div>
+<div class="call-node syscall">__arm64_sys_read</div>
+<div class="call-node label">  schedule() ← 等待数据</div>
+<div class="call-node arrow">... 软中断: tcp_v4_rcv → 数据到达 ...</div>
+<div class="call-node label">  wake_up() ← 唤醒</div>
+<div class="call-node user">read() 返回数据</div>
+</div>
+</div>
+
+<!-- Non-blocking -->
+<div class="model-col">
+<h3>2. Non-blocking I/O</h3>
+<div class="call-chain">
+<div class="call-node user">fcntl(O_NONBLOCK)</div>
+<div class="call-node user">connect()</div>
+<div class="call-node syscall">__sys_connect</div>
+<div class="call-node kernel">tcp_v4_connect() → SYN</div>
+<div class="call-node label">  timeo=0 → 不等待</div>
+<div class="call-node user">→ 返回 -1, EINPROGRESS</div>
+<div class="call-node arrow">... 进程继续运行 ...</div>
+<div class="call-node user">select(fd) 等待可写</div>
+<div class="call-node syscall">__arm64_sys_select</div>
+<div class="call-node kernel">do_select()</div>
+<div class="call-node label">  schedule() ← 睡眠</div>
+<div class="call-node label">  wake_up() ← fd 可写</div>
+<div class="call-node user">select() 返回 1</div>
+<div class="call-node user">write() → 发送数据</div>
+<div class="call-node user">select(fd) 等待可读</div>
+<div class="call-node user">read() → 读取响应</div>
+</div>
+</div>
+
+<!-- select -->
+<div class="model-col">
+<h3>3. select (I/O 多路复用)</h3>
+<div class="call-chain">
+<div class="call-node user">FD_ZERO / FD_SET(fd1,fd2)</div>
+<div class="call-node user">select(nfds, ...)</div>
+<div class="call-node syscall">__arm64_sys_select</div>
+<div class="call-node kernel">do_select()</div>
+<div class="call-node label">  for i in 0..nfds:  ← O(n)</div>
+<div class="call-node label">    poll(fd[i])</div>
+<div class="call-node label">    add_wait_queue(fd[i])</div>
+<div class="call-node label">  schedule() ← 睡眠</div>
+<div class="call-node label">  wake_up() ← 任一 fd 就绪</div>
+<div class="call-node label">  for i in 0..nfds:  ← O(n) 再扫</div>
+<div class="call-node label">    FD_SET(就绪的 fd)</div>
+<div class="call-node label">  copy_to_user()</div>
+<div class="call-node user">select() 返回就绪数</div>
+<div class="call-node user">FD_ISSET 遍历找就绪 fd</div>
+<div class="call-node user">write() / read()</div>
+</div>
+</div>
+
+<!-- epoll -->
+<div class="model-col">
+<h3>4. epoll (I/O 多路复用)</h3>
+<div class="call-chain">
+<div class="call-node user">epoll_create1()</div>
+<div class="call-node syscall">__arm64_sys_epoll_create1</div>
+<div class="call-node kernel">创建 eventpoll 对象</div>
+<div class="call-node label">  ├─ rbr (红黑树)</div>
+<div class="call-node label">  ├─ rdllist (就绪链表)</div>
+<div class="call-node label">  └─ wq (等待队列)</div>
+<div class="call-node user">epoll_ctl(ADD, fd1, EPOLLOUT)</div>
+<div class="call-node syscall">__arm64_sys_epoll_ctl</div>
+<div class="call-node kernel">fd1 插入红黑树</div>
+<div class="call-node kernel">注册 ep_poll_callback</div>
+<div class="call-node user">epoll_ctl(ADD, fd2)</div>
+<div class="call-node user">epoll_wait()</div>
+<div class="call-node syscall">__arm64_sys_epoll_wait</div>
+<div class="call-node kernel">ep_poll()</div>
+<div class="call-node label">  add_wait_queue(ep-&gt;wq)</div>
+<div class="call-node label">  schedule() ← 睡眠</div>
+<div class="call-node label">  ← ep_poll_callback</div>
+<div class="call-node label">  fd → rdllist (O(1))</div>
+<div class="call-node label">  wake_up(ep-&gt;wq)</div>
+<div class="call-node label">  copy_to_user(就绪列表)</div>
+<div class="call-node user">epoll_wait() 返回就绪事件</div>
+<div class="call-node user">write() / epoll_ctl(MOD, IN)</div>
+<div class="call-node user">epoll_wait() → 读取数据</div>
+</div>
+</div>
+
+<!-- io_uring -->
+<div class="model-col highlight">
+<h3>5. io_uring (异步 I/O)</h3>
+<div class="call-chain">
+<div class="call-node user">io_uring_queue_init()</div>
+<div class="call-node syscall">__arm64_sys_io_uring_setup</div>
+<div class="call-node kernel">创建 SQ/CQ ring buffer</div>
+<div class="call-node label">  mmap 共享内存</div>
+<div class="call-node user">io_uring_get_sqe()</div>
+<div class="call-node user">io_uring_prep_connect()</div>
+<div class="call-node label">  写入 SQ ring (无syscall!)</div>
+<div class="call-node user">io_uring_submit()</div>
+<div class="call-node syscall">__arm64_sys_io_uring_enter</div>
+<div class="call-node kernel">io_submit_sqes()</div>
+<div class="call-node kernel">tcp_v4_connect() → SYN</div>
+<div class="call-node arrow">... 内核异步完成 ...</div>
+<div class="call-node kernel">→ 写 CQ ring</div>
+<div class="call-node user">io_uring_wait_cqe()</div>
+<div class="call-node syscall">io_uring_enter (wait)</div>
+<div class="call-node kernel">io_cqring_wait()</div>
+<div class="call-node label">  schedule() 或 poll CQ</div>
+<div class="call-node user">connect 完成, res=0</div>
+<div class="call-node user">prep_write + submit</div>
+<div class="call-node user">prep_read + submit</div>
+<div class="call-node user">wait_cqe → read 完成</div>
+</div>
+</div>
+
+</div>
+
+<!-- ================================================================ -->
+<h2>二、核心差异对比表</h2>
+
+<table class="compare-table">
+<thead>
+<tr>
+  <th width="14%">维度</th>
+  <th width="17%">Blocking</th>
+  <th width="17%">Non-blocking</th>
+  <th width="17%">select</th>
+  <th width="17%">epoll</th>
+  <th width="18%">io_uring</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+  <td><b>编程模型</b></td>
+  <td>同步阻塞</td>
+  <td>轮询 + 非阻塞</td>
+  <td>同步多路复用</td>
+  <td>同步多路复用</td>
+  <td>真正异步</td>
+</tr>
+<tr>
+  <td><b>系统调用数</b></td>
+  <td>1 per op</td>
+  <td>1 per op + 轮询</td>
+  <td>1 per 等待批次</td>
+  <td>1 per 等待批次</td>
+  <td>0~1 per batch (ring buffer)</td>
+</tr>
+<tr>
+  <td><b>fd 管理</b></td>
+  <td>无</td>
+  <td>无</td>
+  <td>用户态，每次传入</td>
+  <td>内核红黑树，一次注册</td>
+  <td>共享内存 ring buffer</td>
+</tr>
+<tr>
+  <td><b>就绪通知</b></td>
+  <td>直接返回</td>
+  <td>轮询 EAGAIN</td>
+  <td>O(n) 全量扫描</td>
+  <td>O(1) 就绪链表</td>
+  <td>O(1) CQ ring 读取</td>
+</tr>
+<tr>
+  <td><b>内存拷贝</b></td>
+  <td>无额外</td>
+  <td>无额外</td>
+  <td>copy_from_user + copy_to_user</td>
+  <td>events copy_to_user</td>
+  <td>mmap 共享内存，零拷贝</td>
+</tr>
+<tr>
+  <td><b>内核等待机制</b></td>
+  <td>sk->sk_wq + schedule()</td>
+  <td>直接返回</td>
+  <td>每个 fd 的 wait_queue</td>
+  <td>ep->wq (一个等待队列)</td>
+  <td>io_wq (内核工作线程)</td>
+</tr>
+<tr>
+  <td><b>并发能力</b></td>
+  <td>1 fd / 线程</td>
+  <td>1 fd / 线程 (忙等)</td>
+  <td>~1024 fd / 线程</td>
+  <td>数万 fd / 线程</td>
+  <td>数十万 op / 线程</td>
+</tr>
+<tr>
+  <td><b>适用场景</b></td>
+  <td>简单脚本</td>
+  <td>几乎不用</td>
+  <td>遗留代码</td>
+  <td>nginx, Redis, Go netpoller</td>
+  <td>数据库, 高性能存储</td>
+</tr>
+<tr>
+  <td><b>真正异步？</b></td>
+  <td class="no">否</td>
+  <td class="no">否</td>
+  <td class="no">否</td>
+  <td class="no">否</td>
+  <td class="yes">是</td>
+</tr>
+</tbody>
+</table>
+
+<!-- ================================================================ -->
+<h2>三、内核等待队列机制 — 所有模型的基石</h2>
+
+<div class="mechanism">
+<pre>
+<span class="co">/*
+ * 无论 Blocking、select、epoll 还是 io_uring，
+ * 底层都依赖 wait_queue + schedule() 机制：
+ * 把进程/线程从 runqueue 摘下来，挂到等待队列上，
+ * 等事件到了再放回去。
+ */</span>
+
+<span class="co">// ===== Blocking: 进程挂在 socket 的等待队列上 =====</span>
+<span class="kw">int</span> <span class="fn">inet_wait_for_connect</span>(<span class="kw">struct</span> sock *sk, ...) {
+    DEFINE_WAIT_FUNC(wait, woken_wake_function);
+    <span class="fn">add_wait_queue</span>(<span class="fn">sk_sleep</span>(sk), &amp;wait);   <span class="co">// 挂到 sk-&gt;sk_wq</span>
+    <span class="kw">while</span> (sk-&gt;sk_state != TCP_ESTABLISHED) {
+        <span class="fn">wait_woken</span>(&amp;wait, TASK_INTERRUPTIBLE, timeo); <span class="co">// schedule()</span>
+    }
+    <span class="fn">remove_wait_queue</span>(<span class="fn">sk_sleep</span>(sk), &amp;wait);
+}
+
+<span class="co">// ===== select: 进程挂在每个 fd 的等待队列上 =====</span>
+<span class="kw">int</span> <span class="fn">do_select</span>(<span class="kw">int</span> n, <span class="kw">fd_set_bits</span> *fds, ...) {
+    <span class="kw">for</span> (i = <span class="hl">0</span>; i &lt; n; i++) {                <span class="co">// O(n) 遍历</span>
+        <span class="fn">poll_initwait</span>(&amp;table);
+        <span class="kw">if</span> (FD_ISSET(i, fds))
+            fd[i]-&gt;f_op-&gt;poll(fd[i], &amp;table);  <span class="co">// 注册到每个 fd</span>
+    }
+    <span class="fn">poll_schedule_timeout</span>(&amp;table, ...);        <span class="co">// schedule()</span>
+}
+
+<span class="co">// ===== epoll: 进程挂在 epoll 自己的等待队列上 =====</span>
+<span class="kw">int</span> <span class="fn">ep_poll</span>(<span class="kw">struct</span> eventpoll *ep, ...) {
+    <span class="fn">__add_wait_queue_exclusive</span>(&amp;ep-&gt;wq, &amp;wait); <span class="co">// 挂到 ep-&gt;wq</span>
+    <span class="kw">for</span> (;;) {
+        <span class="kw">if</span> (!<span class="fn">list_empty</span>(&amp;ep-&gt;rdllist)) <span class="kw">break</span>;   <span class="co">// 就绪链表非空</span>
+        <span class="fn">schedule_hrtimeout_range</span>(...);            <span class="co">// schedule()</span>
+    }
+}
+
+<span class="co">// fd 就绪时回调 (软中断上下文):</span>
+<span class="kw">int</span> <span class="fn">ep_poll_callback</span>(<span class="kw">struct</span> eventpoll *ep, ...) {
+    <span class="fn">list_add_tail</span>(&amp;epi-&gt;rdllink, &amp;ep-&gt;rdllist); <span class="co">// 加入就绪链表 O(1)</span>
+    <span class="fn">wake_up</span>(&amp;ep-&gt;wq);                          <span class="co">// 唤醒 epoll 上的进程</span>
+}
+
+<span class="co">// ===== io_uring: 内核工作线程 + CQ ring =====</span>
+<span class="co">// 提交: SQ ring → io_submit_sqes() → 内核异步执行</span>
+<span class="co">// 完成: 内核写 CQ ring → 用户态直接读取 (mmap, 无 syscall)</span>
+<span class="co">// 等待: io_cqring_wait() → schedule() 或 直接 poll CQ ring</span>
+</pre>
+</div>
+
+<!-- ================================================================ -->
+<h2>四、隧道图 — 从应用到硬件的完整路径</h2>
+
+<div class="mechanism">
+<pre>
+<span class="co">┌─────────────────────────────────────────────────────────────────┐
+│                         用户态应用层                              │
+│  Blocking: connect()/read()/write() — 进程同步等待               │
+│  Non-block: fcntl(O_NONBLOCK) + select — 进程轮询                │
+│  select:  select(nfds, &rfds, &wfds, ...) — 多 fd 批次等待      │
+│  epoll:    epoll_wait(epfd, events, ...) — 内核维护 fd 集合      │
+│  io_uring: io_uring_submit/wait_cqe — 共享内存 ring buffer       │
+├─────────────────────────────────────────────────────────────────┤
+│                         系统调用层                                │
+│  __arm64_sys_connect / __arm64_sys_read / __arm64_sys_write      │
+│  __arm64_sys_select / __arm64_sys_epoll_wait                     │
+│  __arm64_sys_io_uring_setup / __arm64_sys_io_uring_enter         │
+├─────────────────────────────────────────────────────────────────┤
+│                         TCP 协议栈                                │
+│  tcp_v4_connect() → tcp_transmit_skb() → SYN 包                  │
+│  tcp_sendmsg() → tcp_write_xmit() → 数据包                       │
+│  tcp_v4_rcv() → tcp_rcv_established() → 数据到达                 │
+├─────────────────────────────────────────────────────────────────┤
+│                         IP 层                                     │
+│  ip_output() / ip_rcv() → 路由 / 分片 / 重组                     │
+├─────────────────────────────────────────────────────────────────┤
+│                         网卡驱动层                                 │
+│  virtio-net: start_xmit() → 发送                                  │
+│  virtio-net: NAPI poll → GRO → netif_receive_skb() → 接收        │
+├─────────────────────────────────────────────────────────────────┤
+│                         硬件 (QEMU)                                │
+│  virtio-net-pci 设备 → QEMU user-mode 网络栈 → 宿主机网络        │
+└─────────────────────────────────────────────────────────────────┘</span>
+</pre>
+</div>
+
+<!-- ================================================================ -->
+<h2>五、Demo 运行结果</h2>
+
+<div class="mechanism">
+<pre>
+=== Linux 网络 I/O 模型 Demo ===
+
+Network configured: 10.0.2.15/24 gw 10.0.2.2
+
+=== [1/5] Blocking I/O ===
+    connect() → 进程睡眠 → 三次握手完成 → 被唤醒
+    connect() 返回 0
+    Response: HTTP/1.1 200 OK ...
+    ✅ 成功
+
+=== [2/5] Non-blocking I/O + busy poll ===
+    connect() → 立即返回 EINPROGRESS → 轮询等待
+    connect() 返回 -1, errno=115 (Operation now in progress)
+    select() 返回 1 (fd 可写=连接完成)
+    Response: HTTP/1.1 200 OK ...
+    ✅ 成功
+
+=== [3/5] select (I/O Multiplexing) ===
+    一次 select() 等待多个 fd 就绪，O(n) 遍历
+    select() 返回 2 个就绪 fd
+    Response: HTTP/1.1 200 OK ...
+    ✅ 成功
+
+=== [4/5] epoll (I/O Multiplexing) ===
+    epoll_create → epoll_ctl 注册 → epoll_wait 只返回就绪 fd
+    epoll_wait() 返回 2 个就绪事件
+    Response: HTTP/1.1 200 OK ...
+    ✅ 成功
+
+=== [5/5] io_uring (Async I/O) ===
+    io_uring: SQ ring 提交 → 内核异步执行 → CQ ring 取结果
+    io_uring_submit() 提交 connect 请求
+    connect 完成, res=0
+    write 完成, res=59 字节
+    read 完成, res=423 字节
+    Response: HTTP/1.1 200 OK ...
+    ✅ 成功
+
+=== All demos completed ===
+reboot: Power down</pre>
+</div>
+
+</body>
+</html>

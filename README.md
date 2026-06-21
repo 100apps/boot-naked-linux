@@ -1,20 +1,30 @@
 # Boot Naked Linux
 
-从零构建一个最小的 Linux 内核，启动后输出 `Hello from init.c!` 然后关机。
+从零构建一个最小的 Linux 内核，启动后运行 5 种网络 I/O 模型对比 Demo，然后关机。
 
-适合想理解 Linux 内核启动原理的开发者。你可以用 VSCode 单步跟踪内核从第一行代码到执行你的 init 程序的全过程。
+适合想理解 Linux 内核启动原理和网络 I/O 模型的开发者。你可以用 VSCode 单步跟踪内核从第一行代码到执行你的 init 程序的全过程。
 
 ```
-内核 4.5 MB + init 295 KB → 启动并发出 HTTP 请求
+内核 5.6 MB + init 312 KB → 启动并运行 5 种 I/O 模型 Demo
 ```
 
-> 基于 [Boot a Naked Linux](https://nick.zoic.org/art/boot-naked-linux/)，适配 Apple Silicon Mac + VSCode 调试。
+> 基于 [Boot a Naked Linux](https://nick.zoic.org/art/boot-naked-linux/)，支持 macOS / Linux / Windows (WSL)，x86_64 和 arm64 架构。
+>
+> 📊 [网络 I/O 模型调用链路对比图](https://100apps.github.io/boot-naked-linux/network-io-models.html)
 
 ---
 
 ## 快速开始
 
-**前置条件：** [Docker Desktop](https://www.docker.com/products/docker-desktop/)（已启动）+ [Homebrew](https://brew.sh)
+### 前置条件
+
+| 平台 | 需要安装 |
+|------|----------|
+| **macOS** | [Docker Desktop](https://www.docker.com/products/docker-desktop/) + [Homebrew](https://brew.sh)（脚本会自动 `brew install qemu`） |
+| **Linux** | [Docker Engine](https://docs.docker.com/engine/install/)（脚本会自动 `apt/dnf/pacman install qemu-system`） |
+| **Windows** | [WSL 2](https://learn.microsoft.com/windows/wsl/install) + 在 WSL 内按 Linux 步骤操作 |
+
+### 构建 & 启动
 
 ```bash
 git clone https://github.com/100apps/boot-naked-linux.git
@@ -24,11 +34,40 @@ cd boot-naked-linux
 ./boot-naked-linux.sh
 ```
 
+脚本会自动检测你的操作系统和 CPU 架构（arm64/x86_64），选择正确的 QEMU 和内核配置。
+
 看到以下输出就成功了：
 
 ```
 Run /init as init process
-Hello from init.c!
+=== Linux 网络 I/O 模型 Demo ===
+
+Network configured: 10.0.2.15/24 gw 10.0.2.2
+
+=== [1/5] Blocking I/O ===
+    connect() 返回 0
+    Response: HTTP/1.1 200 OK ...
+
+=== [2/5] Non-blocking I/O + busy poll ===
+    connect() 返回 -1, errno=115 (Operation now in progress)
+    select() 返回 1 (fd 可写=连接完成)
+    Response: HTTP/1.1 200 OK ...
+
+=== [3/5] select (I/O Multiplexing) ===
+    select() 返回 2 个就绪 fd
+    Response: HTTP/1.1 200 OK ...
+
+=== [4/5] epoll (I/O Multiplexing) ===
+    epoll_wait() 返回 2 个就绪事件
+    Response: HTTP/1.1 200 OK ...
+
+=== [5/5] io_uring (Async I/O) ===
+    connect 完成, res=0
+    write 完成, res=59 字节
+    read 完成, res=423 字节
+    Response: HTTP/1.1 200 OK ...
+
+=== All demos completed ===
 reboot: Power down
 ```
 
@@ -47,7 +86,11 @@ reboot: Power down
 ### 环境准备
 
 1. VSCode 安装 [Native Debug](https://marketplace.visualstudio.com/items?itemName=webfreak.debug) 扩展（注意：不是 C/C++ 扩展，因为 cppdbg 不支持远程调试 aarch64）
-2. 运行过 `./boot-naked-linux.sh build`
+2. 安装 GDB：
+   - **macOS arm64:** `brew install aarch64-elf-gdb`
+   - **macOS x86_64:** `brew install x86_64-elf-gdb`
+   - **Linux:** `sudo apt install gdb`（或 dnf/pacman）
+3. 运行过 `./boot-naked-linux.sh build`
 
 ### VSCode 一键调试
 
@@ -55,6 +98,8 @@ reboot: Power down
 2. 按 **F5**，选择 **Debug Linux Kernel**
 3. 自动停在 `start_kernel()`，按 **F5 继续**执行到断点
 4. 可以在 `init.c` 的 `main()` 上设断点，调试你自己的 init 程序
+
+> GDB 路径通过 `scripts/gdb-wrapper.sh` 自动检测，无需手动配置。
 
 > **调试配置说明**
 >
@@ -69,12 +114,12 @@ reboot: Power down
 # 终端 1
 ./boot-naked-linux.sh debug
 
-# 终端 2
-aarch64-elf-gdb vmlinux \
-    -ex "source .gdbinit" \
-    -ex "target remote :1234" \
-    -ex "break start_kernel" \
-    -ex "continue"
+# 终端 2（脚本会输出正确的 GDB 命令）
+# arm64 macOS:
+aarch64-elf-gdb vmlinux -ex "source .gdbinit" -ex "target remote :1234" -ex "break start_kernel" -ex "continue"
+
+# x86_64 Linux:
+gdb vmlinux -ex "source .gdbinit" -ex "target remote :1234" -ex "break start_kernel" -ex "continue"
 ```
 
 ### 踩坑记录
@@ -201,7 +246,7 @@ run_init_process("/init")
 break main → F5 继续
 ```
 
-init 程序会配置网络、发一个 HTTP GET 请求到 httpbin.org，然后关机。你可以在 `setup_network()`、`do_http_request()` 上设断点，单步看每一步。
+init 程序会依次运行 5 种网络 I/O 模型 Demo，每种发一个 HTTP GET 请求到 httpbin.org，然后关机。你可以在 `demo_blocking()`、`demo_epoll()`、`demo_io_uring()` 等函数上设断点，单步看每种模型的执行路径。
 
 **动手试：** 单步到 `connect()` 调用前暂停，在 GDB 中查看 `sockfd` 的值——这就是内核为你创建的 socket 文件描述符。
 
@@ -246,6 +291,85 @@ virtio-net 中断               ← 网卡收到 SYN-ACK
 2. 断在 `ip_output` 时执行 `print skb->len`，看 SYN 包的大小
 3. 断在 `tcp_v4_rcv` 时你正在处理从 httpbin.org 返回的 SYN-ACK
 4. 继续执行，下一次 `tcp_v4_rcv` 就是 HTTP 响应数据
+
+### 理解内核的运行时模型
+
+调试时你会发现：断在 `ksys_write` 时，调用栈里没有 `start_kernel`。这不是 bug，而是 Linux 内核的核心设计。
+
+**内核有两个截然不同的阶段：**
+
+| 阶段 | 模型 | 栈的起点 |
+|------|------|---------|
+| **启动阶段** | 顺序执行，像普通程序 | `start_kernel()` |
+| **运行阶段** | 事件驱动，像中断处理器 | 异常向量表入口（`el0t_64_sync` 等） |
+
+**启动阶段**：`start_kernel()` 像 `main()` 一样顺序执行，初始化完所有子系统后，通过 `kernel_execve` 启动 init 进程，自己变成 idle 循环。`start_kernel` 的栈帧到此结束，永远不会再出现。
+
+**运行阶段**：内核不主动运行。CPU 在用户态执行你的 init.c，只有三种事件能触发内核代码：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        用户态 (EL0)                          │
+│                                                             │
+│   init.c: write(2, buf, 46)   ← 执行 svc #0 指令            │
+│                                                             │
+├──────────────── 硬件特权级切换 ──────────────────────────────┤
+│                                                             │
+│                        内核态 (EL1)                          │
+│                                                             │
+│   异常向量表（启动阶段 trap_init 注册的）                      │
+│     → el0t_64_sync           // 异常入口（汇编）              │
+│     → el0_svc_common         // 识别为系统调用                │
+│     → invoke_syscall         // 查系统调用号表                │
+│     → ksys_write             // 你的断点在这里                │
+│       → vfs_write            // VFS 层                      │
+│         → 驱动层 write       // 最终写到串口/终端             │
+│     → eret 返回用户态        // 回到 init.c 的下一条指令      │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| 入口 | 触发方式 | 例子 |
+|------|---------|------|
+| **系统调用** | 用户态执行 `svc` 指令 | `write()`, `socket()`, `connect()`, `reboot()` |
+| **硬件中断** | 外设发信号给 CPU | 网卡收到数据包、定时器 tick |
+| **异常** | CPU 执行出错 | 缺页（page fault）、非法指令 |
+
+每次事件都产生一条**独立的内核调用栈**，从异常向量表入口开始，处理完毕后 `eret` 返回用户态。这就是为什么系统调用断点的调用栈永远从 `el0t_64_sync` 开始，而不是从 `start_kernel` 开始——它们是完全独立的入口点。
+
+**对应到 init.c 的完整生命周期：**
+
+```
+start_kernel                          ← break start_kernel 能看到
+  → kernel_init
+    → kernel_execve("/init")          ← break kernel_execve 能看到
+      ──── eret 进入用户态 ────
+        main()
+          fprintf("Hello")
+            → svc → ksys_write        ← break ksys_write 能看到
+          mount("/proc")
+            → svc → __arm64_sys_mount
+          socket()
+            → svc → __sys_socket      ← break __sys_socket
+          connect()
+            → svc → tcp_v4_connect    ← break tcp_v4_connect
+          write(sockfd, request)
+            → svc → tcp_sendmsg       ← break tcp_sendmsg
+          ──── 网卡收到响应包 ────
+            → irq → tcp_v4_rcv        ← break tcp_v4_rcv（中断栈）
+          read(sockfd, buf)
+            → svc → tcp_recvmsg
+          reboot()
+            → svc → __arm64_sys_reboot
+```
+
+每一次 `svc` / `irq` 都是一条独立的内核栈，互不关联。**Linux 内核不是一个持续运行的程序，而是一组事件处理函数。**
+
+**动手试：**
+
+1. 断在 `ksys_write` 后执行 `bt`，观察栈底是 `el0t_64_sync`（系统调用入口），不是 `start_kernel`
+2. 断在 `tcp_v4_rcv` 后执行 `bt`，观察栈底是中断入口（`el0_irq` 或 `el1_irq`），同样不是 `start_kernel`
+3. 对比 `break kernel_execve` 的调用栈——那里你能看到 `kernel_init → start_kernel` 的完整启动链
 
 ### 网络栈关键函数速查
 
@@ -297,6 +421,39 @@ CPU 上电 → head.S (汇编) → start_kernel()
 | **网络栈** | `tcp_v4_connect()` | `net/ipv4/tcp_ipv4.c` | TCP 连接发起，三次握手从这里开始 |
 | **IP 协议** | `ip_rcv()` / `ip_output()` | `net/ipv4/ip_input.c` | IP 包的收发入口 |
 
+### 第七站：网络 I/O 模型对比 — 从阻塞到 io_uring
+
+init.c 依次运行 5 种网络 I/O 模型，每种发一个 HTTP GET 请求。你可以通过断点走遍每种模型的完整调用链路。
+
+> 📊 [完整调用链路对比图](https://100apps.github.io/boot-naked-linux/network-io-models.html)
+
+| 模型 | 内核入口 | 等待机制 | 编程模型 |
+|------|---------|---------|---------|
+| **Blocking** | `__arm64_sys_connect` → `tcp_v4_connect` → `inet_wait_for_connect` | `wait_queue` + `schedule()` | 同步阻塞 |
+| **Non-blocking** | `__arm64_sys_connect` → `tcp_v4_connect`（立即返回 EINPROGRESS） | 轮询 / select | 轮询 |
+| **select** | `__arm64_sys_select` → `do_select` | 每个 fd 的 wait_queue，O(n) | 同步多路复用 |
+| **epoll** | `__arm64_sys_epoll_wait` → `ep_poll` | `ep->wq` + `ep_poll_callback`，O(1) | 同步多路复用 |
+| **io_uring** | `__arm64_sys_io_uring_enter` → `io_submit_sqes` | SQ/CQ ring buffer + kernel worker | 真正异步 |
+
+**调试建议：**
+
+```
+# 在 GDB 中依次设置这些断点，观察每种模型的内核路径
+break tcp_v4_connect     # 所有模型都经过这里
+break inet_wait_for_connect  # 只有 Blocking 模型会到这里
+break do_select              # select 模型的核心等待
+break ep_poll                # epoll 模型的核心等待
+break ep_poll_callback       # epoll 的 fd 就绪回调
+break io_submit_sqes         # io_uring 提交请求
+break io_cqring_wait         # io_uring 等待完成
+```
+
+**本质区别：** 所有模型底层都是 `wait_queue` + `schedule()`，区别在于**谁在等、等什么**：
+- Blocking：进程 == 等待者，挂在 socket 的 `sk->sk_wq` 上
+- select：进程挂在每个 fd 的等待队列上，任何一个就绪就唤醒
+- epoll：进程挂在 epoll 实例的 `ep->wq` 上，fd 就绪时回调 `ep_poll_callback` 加入就绪链表
+- io_uring：不需要进程睡眠，内核完成 I/O 后直接写共享内存 ring buffer
+
 ---
 
 ## 实现原理
@@ -305,7 +462,7 @@ CPU 上电 → head.S (汇编) → start_kernel()
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  QEMU (qemu-system-aarch64 -machine virt)        │
+│  QEMU (自动选择 aarch64 或 x86_64)                │
 │                                                   │
 │  ┌────────────┐       ┌────────────┐              │
 │  │   Image     │       │   initrd   │              │
@@ -323,6 +480,19 @@ CPU 上电 → head.S (汇编) → start_kernel()
 │        → reboot(RB_POWER_OFF)                      │
 └──────────────────────────────────────────────────┘
 ```
+
+### 跨平台支持
+
+脚本通过 `scripts/platform.sh` 自动检测运行环境：
+
+| 检测项 | arm64 (Apple Silicon / ARM Linux) | x86_64 (Intel Mac / x86 Linux) |
+|--------|-----------------------------------|-------------------------------|
+| QEMU | `qemu-system-aarch64 -machine virt -cpu cortex-a57` | `qemu-system-x86_64 -machine pc -cpu qemu64` |
+| 硬件加速 | 无 | Linux 自动启用 `-enable-kvm` |
+| 内核串口 | PL011 (`ttyAMA0`) | 8250 (`ttyS0`) |
+| 内核镜像 | `arch/arm64/boot/Image` | `arch/x86/boot/bzImage` |
+| GDB (macOS) | `aarch64-elf-gdb` | `x86_64-elf-gdb` |
+| GDB (Linux) | `gdb` | `gdb` |
 
 ### Linux 启动的最小要素
 
@@ -364,15 +534,17 @@ echo 'init' | cpio -o --format=newc | gzip -c > initrd
 |------|--------|------|
 | **启动** | `CONFIG_BLK_DEV_INITRD` + `CONFIG_RD_GZIP` | 加载并解压 initrd |
 | **执行** | `CONFIG_BINFMT_ELF` | 支持 ELF 格式 |
-| **输出** | `CONFIG_TTY` + `CONFIG_SERIAL_AMBA_PL011` | 串口控制台 |
-| **平台** | `CONFIG_VIRTIO` + `CONFIG_PCI` + `CONFIG_OF` | QEMU virt 平台 |
+| **输出** | `CONFIG_TTY` + 串口驱动 | arm64: PL011, x86_64: 8250 |
+| **平台** | `CONFIG_VIRTIO` + `CONFIG_PCI` | QEMU 虚拟设备总线 |
 | **调试** | `CONFIG_DEBUG_INFO` + `CONFIG_FRAME_POINTER` | 调试符号 + 栈帧 |
 
 ### 为什么用 Docker
 
-macOS 没有 Linux 工具链。Docker Desktop 在 Apple Silicon 上跑 arm64 Linux VM，gcc 直接产出 arm64 二进制，不需要交叉编译。
+macOS 没有 Linux 工具链。Docker Desktop 在 Apple Silicon 上跑 arm64 Linux VM，gcc 直接产出对应架构的二进制，不需要交叉编译。Linux 用户同样受益于一致的构建环境。
 
 ### QEMU 启动参数
+
+脚本根据架构自动选择参数。以 arm64 为例：
 
 ```bash
 qemu-system-aarch64 \
@@ -385,6 +557,8 @@ qemu-system-aarch64 \
     -append "console=ttyAMA0"   # 控制台绑定到串口
     -no-reboot            # reboot() 后退出 QEMU
 ```
+
+x86_64 系统上会自动切换为 `qemu-system-x86_64 -machine pc -cpu qemu64 -append "console=ttyS0"`，Linux 有 KVM 时自动启用硬件加速。
 
 ### 启动时间线
 
@@ -404,12 +578,15 @@ qemu-system-aarch64 \
 
 ```
 boot-naked-linux/
-├── boot-naked-linux.sh     一键脚本（构建/启动/调试）
-├── init.c                  init 程序源码
-├── kernel.config.sh        内核配置脚本
-├── Dockerfile              Docker 构建文件
-├── .gdbinit                GDB 初始化（路径映射 + init 符号加载）
+├── boot-naked-linux.sh     一键脚本（构建/启动/调试，自动检测平台）
+├── init.c                  init 程序源码（5 种网络 I/O 模型 Demo）
+├── kernel.config.sh        内核配置脚本（按架构启用不同驱动）
+├── Dockerfile              Docker 构建文件（支持 arm64/amd64）
+├── .gdbinit                GDB 初始化（路径映射 + init 符号加载 + 所有模型断点）
+├── network-io-models.html  网络 I/O 模型调用链路对比图
 ├── scripts/
+│   ├── platform.sh         平台检测（OS/架构/QEMU/GDB 自动配置）
+│   ├── gdb-wrapper.sh      GDB 包装器（VSCode 用，自动选择正确的 GDB）
 │   └── start-qemu-debug.sh QEMU 调试启动器（供 VSCode 使用）
 ├── .vscode/
 │   ├── launch.json         调试配置（F5 一键调试）
@@ -417,11 +594,11 @@ boot-naked-linux/
 │   └── settings.json       内核源码索引配置
 │
 │  以下为构建产物（已在 .gitignore 中排除）：
-├── Image                   arm64 Linux 内核（~3 MB）
-├── vmlinux                 带调试符号的内核 ELF（~36 MB）
-├── init-debug              带调试符号的 init（~627 KB）
-├── initrd                  初始内存盘（~274 KB）
-└── linux-src/              内核源码（~1.6 GB，调试源码跳转用）
+├── Image                   内核镜像（arm64: Image, x86_64: bzImage）
+├── vmlinux                 带调试符号的内核 ELF
+├── init-debug              带调试符号的 init
+├── initrd                  初始内存盘
+└── linux-src/              内核源码（调试源码跳转用）
 ```
 
 ---
@@ -440,8 +617,11 @@ initrd 格式不对。确保用 `cpio --format=newc` 生成，且内核开启了
 **Q: 想修改 init 程序？**
 编辑 `init.c` 后重新 `./boot-naked-linux.sh build`。
 
-**Q: 想换内核版本？**
-`KERNEL_VERSION=6.11 ./boot-naked-linux.sh build`
+**Q: Windows 上怎么用？**
+安装 [WSL 2](https://learn.microsoft.com/windows/wsl/install)，在 WSL 终端内按 Linux 步骤操作即可。VSCode 使用 [Remote - WSL](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) 扩展打开项目。
+
+**Q: 我是 x86_64 机器，能用吗？**
+可以。脚本自动检测架构，会使用 `qemu-system-x86_64` 和对应的内核配置。Linux 有 KVM 时还会自动启用硬件加速。
 
 ---
 

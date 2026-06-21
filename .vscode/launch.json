@@ -9,7 +9,7 @@
             "target": "localhost:1234",
             "remote": true,
             "cwd": "${workspaceFolder}",
-            "gdbpath": "/opt/homebrew/bin/aarch64-elf-gdb",
+            "gdbpath": "${workspaceFolder}/scripts/gdb-wrapper.sh",
             "autorun": [
                 "source ${workspaceFolder}/.gdbinit",
                 "break start_kernel"
@@ -24,7 +24,7 @@
             "target": "localhost:1234",
             "remote": true,
             "cwd": "${workspaceFolder}",
-            "gdbpath": "/opt/homebrew/bin/aarch64-elf-gdb",
+            "gdbpath": "${workspaceFolder}/scripts/gdb-wrapper.sh",
             "autorun": [
                 "source ${workspaceFolder}/.gdbinit",
                 "break start_kernel"

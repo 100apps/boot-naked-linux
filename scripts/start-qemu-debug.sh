@@ -3,18 +3,21 @@
 set -eu
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$PROJECT_DIR/scripts/platform.sh"
+detect_platform
 
-pkill -f 'qemu-system-aarch64.*-gdb tcp::1234' 2>/dev/null || true
+pkill -f "$QEMU_BIN.*-gdb tcp::1234" 2>/dev/null || true
 sleep 0.3
 
-qemu-system-aarch64 \
-    -machine virt \
-    -cpu cortex-a57 \
+$QEMU_BIN \
+    $QEMU_MACHINE \
+    $QEMU_CPU \
+    $QEMU_ACCEL \
     -m 256M \
     -nographic \
     -kernel "$PROJECT_DIR/Image" \
     -initrd "$PROJECT_DIR/initrd" \
-    -append "console=ttyAMA0 nokaslr" \
+    -append "console=$QEMU_CONSOLE nokaslr" \
     -no-reboot \
     -netdev user,id=net0 \
     -device virtio-net-pci,netdev=net0 \
@@ -23,7 +26,7 @@ qemu-system-aarch64 \
 QEMU_PID=$!
 
 for i in $(seq 1 30); do
-    if lsof -i :1234 -sTCP:LISTEN >/dev/null 2>&1; then
+    if check_port_ready; then
         echo "QEMU GDB server ready on :1234 (pid=$QEMU_PID)"
         wait $QEMU_PID 2>/dev/null
         exit 0
