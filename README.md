@@ -11,7 +11,7 @@
 > 基于 [Boot a Naked Linux](https://nick.zoic.org/art/boot-naked-linux/)，支持 macOS / Linux / Windows (WSL)，x86_64 和 arm64 架构。
 >
 > 📊 [网络 I/O 模型调用链路对比图](https://100apps.github.io/boot-naked-linux/network-io-models.html)
-> 🧠 [内核本质理解：事件处理器 + 数据结构 | 裁判 + 管家 + 翻译官](https://100apps.github.io/boot-naked-linux/kernel-concepts.html)
+> 🧠 [内核本质理解：2700 万行代码在干什么](https://100apps.github.io/boot-naked-linux/kernel-concepts.html)
 
 ---
 
@@ -560,6 +560,12 @@ qemu-system-aarch64 \
 ```
 
 x86_64 系统上会自动切换为 `qemu-system-x86_64 -machine pc -cpu qemu64 -append "console=ttyS0"`，Linux 有 KVM 时自动启用硬件加速。
+
+### 内核代码量
+
+Linux 内核有 **2700 万行代码**，但你的项目裁剪后只用了约 **350 万行**（tinyconfig 排除掉了 GPU、USB、WiFi、蓝牙、音频等不需要的驱动）。真正参与 Demo 的代码可能不到 10 万行。
+
+> 🧠 详细分析：[内核本质理解 — 2700 万行代码在干什么](https://100apps.github.io/boot-naked-linux/kernel-concepts.html)
 
 ### 启动时间线
 

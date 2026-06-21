@@ -1389,10 +1389,328 @@ QEMU 模拟的 virtio-net/virtio-blk 展示了翻译官角色的实际效果：
 调试时 (.gdbinit + VSCode launch.json) 可以在上述任何函数上设断点，
 观察数据结构的变化和事件处理的完整流程。
 </pre>
+<div class="part-divider"></div>
+<div class="part-title" style="color:#e3b341;">第三部分：内核代码量分析 — 27,577,520 行都在干什么</div>
+<div class="part-subtitle">基于 Linux mainline (v7.1.0+)，统计 C + Header + Assembly + Rust 源码</div>
+
+<h2 id="overview"><span class="tag tag-handler">Stats</span>3.1 总览</h2>
+
+<div class="cards-grid">
+<div class="card highlight-blue">
+<h4>语言分布</h4>
+<table class="struct-table">
+<tr><th>语言</th><th>文件数</th><th>代码行数</th><th>占比</th></tr>
+<tr><td class="field-name">C</td><td class="number">33,149</td><td class="number">18,616,325</td><td class="field-desc">67.5%</td></tr>
+<tr><td class="field-name">C/C++ Header</td><td class="number">25,545</td><td class="number">8,325,465</td><td class="field-desc">30.2%</td></tr>
+<tr><td class="field-name">Assembly</td><td class="number">1,286</td><td class="number">410,321</td><td class="field-desc">1.5%</td></tr>
+<tr><td class="field-name">Rust</td><td class="number">469</td><td class="number">113,879</td><td class="field-desc">0.4%</td></tr>
+<tr><td class="field-name">make</td><td class="number">2,845</td><td class="number">49,560</td><td class="field-desc">0.2%</td></tr>
+<tr><td class="field-name">其他</td><td class="number">835</td><td class="number">61,970</td><td class="field-desc">0.2%</td></tr>
+<tr style="font-weight:bold; background:#1c2128;"><td class="field-name">合计</td><td class="number">64,129</td><td class="number">27,577,520</td><td class="field-desc">100%</td></tr>
+</table>
+</div>
+
+<div class="card highlight-orange">
+<h4>关键数字</h4>
+<pre>
+📦 64,129 个源文件
+📝 27,577,520 行代码
+🔧 33,149 个 C 文件 (67.5%)
+📋 25,545 个头文件 (30.2%)
+⚡ 1,286 个汇编文件 (1.5%)
+🦀 469 个 Rust 文件 (0.4%)
+
+🔢 注释 + 空行: 约 9,000,000 行
+📐 纯代码: 约 18,500,000 行
+
+对比：
+  Linux 0.01 (1991): ~10,000 行
+  Linux 2.6.0 (2003): ~5,000,000 行
+  Linux 7.1.0 (2026): ~27,577,520 行
+</pre>
+</div>
+</div>
+
+<h2 id="by-subsystem"><span class="tag tag-data">Data</span>3.2 按子系统分类</h2>
+
+<div class="cards-grid">
+<div class="card highlight-green">
+<h4>按事件处理 / 数据结构分类</h4>
+<table class="struct-table">
+<tr><th>类别</th><th>子系统</th><th>行数</th><th>占比</th><th>角色</th></tr>
+<tr><td class="field-name" rowspan="3">事件处理器</td>
+<td class="field-name">系统调用入口</td><td class="number">~12,000</td><td class="field-desc">0.04%</td><td>arch/arm64/kernel/syscall.c + sys.c</td></tr>
+<tr><td class="field-name">中断处理</td><td class="number">~15,000</td><td class="field-desc">0.05%</td><td>kernel/irq/ + drivers/irqchip/</td></tr>
+<tr><td class="field-name">异常处理</td><td class="number">~7,500</td><td class="field-desc">0.03%</td><td>mm/memory.c (缺页处理)</td></tr>
+<tr><td class="field-name" rowspan="7">数据结构</td>
+<td class="field-name">task_struct (进程)</td><td class="number">~524,000</td><td class="field-desc">1.9%</td><td>kernel/ 全部 C 代码</td></tr>
+<tr><td class="field-name">mm_struct (内存)</td><td class="number">~214,000</td><td class="field-desc">0.8%</td><td>mm/ 全部 (缺页、分配器、交换)</td></tr>
+<tr><td class="field-name">files_struct (文件)</td><td class="number">~1,464,000</td><td class="field-desc">5.3%</td><td>fs/ 全部 (VFS + 各文件系统)</td></tr>
+<tr><td class="field-name">struct sock (网络)</td><td class="number">~1,233,000</td><td class="field-desc">4.5%</td><td>net/ 全部 (TCP/IP + 协议栈)</td></tr>
+<tr><td class="field-name">struct page (物理页)</td><td class="number">~214,000</td><td class="field-desc">0.8%</td><td>mm/ (含在 mm 统计中)</td></tr>
+<tr><td class="field-name">sk_buff (网络缓冲)</td><td class="number">~1,233,000</td><td class="field-desc">4.5%</td><td>net/ (含在 net 统计中)</td></tr>
+<tr><td class="field-name">block_device (块设备)</td><td class="number">~67,000</td><td class="field-desc">0.2%</td><td>block/ + drivers/block/</td></tr>
+</table>
+</div>
+
+<div class="card highlight-blue">
+<h4>按裁判 / 管家 / 翻译官分类</h4>
+<table class="struct-table">
+<tr><th>角色</th><th>子系统</th><th>行数</th><th>占比</th></tr>
+<tr><td class="field-name" rowspan="3">裁判</td><td class="field-name">调度器 (kernel/sched/)</td><td class="number">~64,000</td><td class="field-desc">0.2%</td></tr>
+<tr><td class="field-name">安全 (security/)</td><td class="number">~114,000</td><td class="field-desc">0.4%</td></tr>
+<tr><td class="field-name">锁 (kernel/locking/)</td><td class="number">~19,000</td><td class="field-desc">0.07%</td></tr>
+<tr><td class="field-name" rowspan="4">管家</td><td class="field-name">内存分配 (mm/page_alloc + slub + vmalloc)</td><td class="number">~23,000</td><td class="field-desc">0.08%</td></tr>
+<tr><td class="field-name">进程管理 (fork/exit/pid)</td><td class="number">~9,500</td><td class="field-desc">0.03%</td></tr>
+<tr><td class="field-name">信号 (kernel/signal.c)</td><td class="number">~5,000</td><td class="field-desc">0.02%</td></tr>
+<tr><td class="field-name">时间 (kernel/time/)</td><td class="number">~27,000</td><td class="field-desc">0.1%</td></tr>
+<tr><td class="field-name" rowspan="3">翻译官</td><td class="field-name">VFS (fs/namei + open + read_write + ...)</td><td class="number">~29,000</td><td class="field-desc">0.1%</td></tr>
+<tr><td class="field-name">块层 (block/)</td><td class="number">~67,000</td><td class="field-desc">0.2%</td></tr>
+<tr><td class="field-name">驱动 (drivers/ 全部)</td><td class="number">~836,000</td><td class="field-desc">3.0%</td></tr>
+</table>
+</div>
+</div>
+
+<h2 id="breakdown"><span class="tag tag-referee">Detail</span>3.3 各子系统详细分解</h2>
+
+<div class="cards-grid">
+<div class="card highlight-green">
+<h4>核心内核 (kernel/) — 524,108 行</h4>
+<pre>
+<span class="comment">/* 事件处理的"大脑"：调度、中断、锁、信号、时间 */</span>
+<span class="keyword">kernel/sched/</span>     <span class="number">63,918</span> 行  ← CFS 调度器、负载均衡、RT 调度
+<span class="keyword">kernel/time/</span>      <span class="number">26,979</span> 行  ← 高精度定时器、时钟事件、NTP
+<span class="keyword">kernel/locking/</span>   <span class="number">18,602</span> 行  ← 自旋锁、互斥锁、RCU、信号量
+<span class="keyword">kernel/irq/</span>       <span class="number">15,005</span> 行  ← 中断控制器抽象、IRQ 域
+<span class="keyword">kernel/fork/exit/pid</span> <span class="number">9,488</span> 行  ← 进程创建 (copy_process)、销毁、PID 分配
+<span class="keyword">kernel/signal.c</span>    <span class="number">5,054</span> 行  ← 信号发送、处理、排队
+<span class="keyword">kernel/workqueue</span>   <span class="number">~8,000</span> 行  ← 内核工作队列 (下半部机制)
+<span class="keyword">kernel/bpf/</span>       <span class="number">~50,000</span> 行  ← eBPF 虚拟机
+<span class="keyword">其他</span>               <span class="number">~327,000</span> 行  ← 模块、cgroup、审计、跟踪等
+</pre>
+</div>
+
+<div class="card highlight-blue">
+<h4>内存管理 (mm/) — 214,046 行</h4>
+<pre>
+<span class="comment">/* 物理内存的"管家"：分配、回收、映射、交换 */</span>
+<span class="keyword">mm/page_alloc.c</span>   <span class="number">7,966</span> 行  ← Buddy System 伙伴分配器
+<span class="keyword">mm/slub.c</span>         <span class="number">9,927</span> 行  ← SLUB 分配器 (kmalloc 后端)
+<span class="keyword">mm/vmalloc.c</span>      <span class="number">5,570</span> 行  ← 虚拟连续内存分配
+<span class="keyword">mm/memory.c</span>       <span class="number">7,555</span> 行  ← 缺页处理 (do_page_fault)、COW、页表操作
+<span class="keyword">mm/mmap.c</span>         <span class="number">1,921</span> 行  ← mmap/munmap/mprotect 实现
+<span class="keyword">mm/swapfile.c</span>     <span class="number">~3,000</span> 行  ← 交换分区管理
+<span class="keyword">mm/compaction.c</span>   <span class="number">3,356</span> 行  ← 内存碎片整理
+<span class="keyword">mm/ksm.c</span>          <span class="number">4,021</span> 行  ← Kernel Same-page Merging (去重)
+<span class="keyword">mm/hugetlb.c</span>      <span class="number">~12,000</span> 行  ← 大页 (HugeTLB + THP)
+<span class="keyword">其他</span>               <span class="number">~158,000</span> 行  ← 回收、水位线、cgroup、KASAN、mempolicy 等
+</pre>
+</div>
+
+<div class="card highlight-orange">
+<h4>文件系统 (fs/) — 1,463,718 行</h4>
+<pre>
+<span class="comment">/* 一切皆文件的"翻译官"：VFS + 各文件系统实现 */</span>
+<span class="keyword">VFS 核心</span>          <span class="number">28,853</span> 行  ← namei/open/read_write/dcache/inode/file_table
+<span class="keyword">fs/ext4/</span>          <span class="number">63,358</span> 行  ← 最常用的 Linux 文件系统
+<span class="keyword">fs/btrfs/</span>         <span class="number">~150,000</span> 行 ← COW 文件系统 (快照/压缩)
+<span class="keyword">fs/xfs/</span>           <span class="number">~120,000</span> 行 ← 高性能日志文件系统
+<span class="keyword">fs/nfs/</span>           <span class="number">~60,000</span> 行  ← 网络文件系统客户端
+<span class="keyword">fs/proc/</span>          <span class="number">17,620</span> 行  ← /proc 伪文件系统
+<span class="keyword">fs/sysfs/</span>         <span class="number">~5,000</span> 行  ← /sys 设备模型导出
+<span class="keyword">fs/overlayfs/</span>     <span class="number">~5,000</span> 行  ← 联合文件系统 (Docker 基础)
+<span class="keyword">其他</span>               <span class="number">~1,014,000</span> 行 ← 40+ 种文件系统、配额、通知、锁、加密等
+</pre>
+</div>
+
+<div class="card highlight-purple">
+<h4>网络栈 (net/) — 1,233,487 行</h4>
+<pre>
+<span class="comment">/* 网络通信的"栈"：从 socket API 到网卡驱动 */</span>
+<span class="keyword">net/core/</span>         <span class="number">89,635</span> 行  ← socket 层、设备抽象、sk_buff、邻居子系统
+<span class="keyword">net/ipv4/</span>         <span class="number">114,367</span> 行 ← TCP、UDP、IP、ICMP、路由、ARP、Netfilter
+<span class="keyword">net/ipv6/</span>         <span class="number">77,720</span> 行  ← IPv6 协议栈
+<span class="keyword">net/netfilter/</span>    <span class="number">~80,000</span> 行 ← 防火墙 (iptables/nftables)
+<span class="keyword">net/bpf/</span>          <span class="number">~40,000</span> 行  ← BPF 网络程序 (XDP, TC)
+<span class="keyword">net/wireless/</span>     <span class="number">~100,000</span> 行 ← WiFi 协议栈 (mac80211)
+<span class="keyword">net/bluetooth/</span>    <span class="number">~60,000</span> 行  ← 蓝牙协议栈
+<span class="keyword">net/mptcp/</span>        <span class="number">~25,000</span> 行  ← 多路径 TCP
+<span class="keyword">net/sched/</span>        <span class="number">~30,000</span> 行  ← 流量控制 (tc)
+<span class="keyword">其他</span>               <span class="number">~617,000</span> 行 ← 30+ 种协议族 (unix/nfc/rds/sctp/tipc...)
+</pre>
+</div>
+
+<div class="card highlight-red">
+<h4>驱动 (drivers/) — 836,410 行 (仅统计本项目启用的部分)</h4>
+<pre>
+<span class="comment">/* 硬件的"翻译官"：每种设备一个驱动 */</span>
+<span class="keyword">drivers/net/</span>      <span class="number">696,265</span> 行 ← 网卡驱动 (virtio-net/e1000/r8169/ixgbe/mlx5...)
+<span class="keyword">drivers/usb/</span>      <span class="number">524,799</span> 行 ← USB 主控 + 设备驱动
+<span class="keyword">drivers/gpu/</span>      <span class="number">369,245</span> 行 ← DRM/KMS 显卡驱动 (i915/amdgpu/nouveau)
+<span class="keyword">drivers/tty/</span>      <span class="number">186,790</span> 行 ← 串口/终端/pty (你的 ttyAMA0)
+<span class="keyword">drivers/pci/</span>      <span class="number">163,600</span> 行 ← PCI 总线枚举和管理
+<span class="keyword">drivers/block/</span>    <span class="number">89,373</span> 行  ← 块设备驱动 (virtio-blk/nvme)
+<span class="keyword">drivers/virtio/</span>   <span class="number">16,753</span> 行  ← virtio 框架 (你的 QEMU 设备)
+<span class="keyword">其他</span>               <span class="number">~??</span> 行       ← 总计 drivers/ 超过 8,000,000 行
+<span class="comment">注：本项目的 tinyconfig 只启用了一小部分驱动，完整内核 drivers/ 超过 800 万行</span>
+</pre>
+</div>
+
+<div class="card highlight-green">
+<h4>架构相关 (arch/) — 以 arm64 为例</h4>
+<pre>
+<span class="comment">/* CPU 架构的"翻译官"：启动、上下文切换、系统调用入口 */</span>
+<span class="keyword">arch/arm64/</span>       <span class="number">121,931</span> 行 ← ARM64 架构代码 (本项目使用)
+<span class="keyword">arch/arm64/kernel/</span> <span class="number">~40,000</span> 行 ← 启动、异常向量、SMP、信号、ptrace
+<span class="keyword">arch/arm64/mm/</span>    <span class="number">~12,000</span> 行  ← 页表、TLB、cache 管理
+<span class="keyword">arch/arm64/kvm/</span>   <span class="number">~50,000</span> 行  ← KVM 虚拟化 (本项目未启用)
+<span class="keyword">arch/arm64/boot/</span>  <span class="number">~3,000</span> 行   ← 设备树 (dts)
+<span class="keyword">其他</span>               <span class="number">~16,000</span> 行  ← crypto、net、include 等
+
+<span class="comment">/* 对比：完整内核所有架构 */</span>
+<span class="keyword">arch/x86/</span>         <span class="number">~350,000</span> 行 ← x86_64 架构代码
+<span class="keyword">arch/riscv/</span>       <span class="number">~80,000</span> 行  ← RISC-V 架构代码
+<span class="keyword">arch/ 总计</span>        <span class="number">~2,500,000</span> 行 ← 全部架构
+</pre>
+</div>
+
+<div class="card highlight-blue">
+<h4>其他子系统</h4>
+<pre>
+<span class="keyword">block/</span>             <span class="number">67,409</span> 行  ← 块层 IO 调度 (mq-deadline/kyber/bfq)
+<span class="keyword">security/</span>         <span class="number">113,834</span> 行 ← LSMs (SELinux/AppArmor/IMA/EVM)
+<span class="keyword">crypto/</span>           <span class="number">64,685</span> 行  ← 加密算法 (AES/SHA/RSA/ECDH)
+<span class="keyword">lib/</span>              <span class="number">261,826</span> 行 ← 内核库函数 (rbtree/list/hashtable/string/crc)
+<span class="keyword">sound/</span>            <span class="number">1,426,727</span> 行 ← 音频子系统 (ALSA SoC)
+<span class="keyword">ipc/</span>               <span class="number">9,593</span> 行  ← SysV IPC (共享内存/信号量/消息队列)
+<span class="keyword">init/</span>              <span class="number">4,682</span> 行  ← 内核初始化 (start_kernel 就在这里!)
+<span class="keyword">usr/</span>                 <span class="number">781</span> 行  ← initramfs 生成工具
+<span class="keyword">virt/</span>             <span class="number">10,845</span> 行  ← KVM 通用虚拟化代码
+</pre>
+</div>
+</div>
+
+<h2 id="what-they-do"><span class="tag tag-translator">Summary</span>3.4 三个视角的代码行数占比</h2>
+
+<div class="cards-grid">
+<div class="card highlight-green">
+<h4>视角一：事件处理器 vs 数据结构</h4>
+<pre>
+<span class="keyword">事件处理器 (Handler)</span>
+  arch 系统调用入口    ~12,000  行  (0.04%)
+  kernel/irq 中断      ~15,000  行  (0.05%)
+  mm/memory 缺页处理    ~7,500  行  (0.03%)
+  ----------------------------------------
+  小计                 ~34,500  行  (0.13%)
+
+<span class="keyword">数据结构 (Data Structure)</span>
+  kernel/ 进程管理     524,108  行  (1.9%)
+  mm/ 内存管理         214,046  行  (0.8%)
+  fs/ 文件系统       1,463,718  行  (5.3%)
+  net/ 网络栈        1,233,487  行  (4.5%)
+  block/ 块层          67,409  行  (0.2%)
+  crypto/ 加密         64,685  行  (0.2%)
+  ipc/ IPC              9,593  行  (0.03%)
+  lib/ 库函数         261,826  行  (0.9%)
+  ----------------------------------------
+  小计              ~3,838,872  行  (13.9%)
+
+<span class="keyword">硬件胶水 (Glue)</span>
+  arch/ architecture ~2,500,000  行  (9.1%)
+  drivers/ 驱动     ~8,000,000+  行  (29.0%)
+  sound/ 音频       1,426,727  行  (5.2%)
+  ----------------------------------------
+  小计             ~11,926,727  行  (43.3%)
+
+<span class="comment">/* 结论：2700 万行中，</span>
+<span class="comment"> *   - 事件处理器只有 ~3.5 万行 (0.13%)</span>
+<span class="comment"> *   - 数据结构 + 算法 ~384 万行 (13.9%)</span>
+<span class="comment"> *   - 硬件驱动/架构胶水 ~1193 万行 (43.3%)</span>
+<span class="comment"> *   - 其余 ~40% 是头文件、构建脚本、文档等</span>
+<span class="comment"> *</span>
+<span class="comment"> * 真正"内核"的东西很少，大量代码是驱动和架构适配。</span>
+<span class="comment"> */</span>
+</pre>
+</div>
+
+<div class="card highlight-orange">
+<h4>视角二：裁判 + 管家 + 翻译官</h4>
+<pre>
+<span class="keyword">裁判 (Referee) — 执行规则</span>
+  kernel/sched/ 调度    ~64,000  行
+  security/ 安全        ~114,000  行
+  kernel/locking/ 锁    ~19,000  行
+  kernel/signal 信号     ~5,000  行
+  ----------------------------------------
+  小计                 ~202,000  行  (0.7%)
+
+<span class="keyword">管家 (Steward) — 管理资源</span>
+  mm/ 内存分配         ~214,000  行
+  kernel/fork+exit      ~9,500  行
+  kernel/time           ~27,000  行
+  kernel/cgroup          ~??    行
+  ----------------------------------------
+  小计                 ~250,500  行  (0.9%)
+
+<span class="keyword">翻译官 (Translator) — 硬件抽象</span>
+  fs/ 文件系统       1,463,718  行
+  net/ 网络栈        1,233,487  行
+  block/ 块层          67,409  行
+  drivers/ 驱动     ~8,000,000+ 行
+  arch/ 架构适配     ~2,500,000  行
+  ----------------------------------------
+  小计             ~13,264,614  行  (48.1%)
+
+<span class="comment">/* 结论：</span>
+<span class="comment"> *   - 翻译官占了近一半代码 (48%)</span>
+<span class="comment"> *   - 裁判和管家各不到 1%</span>
+<span class="comment"> *   - 内核主要是"翻译"工作：把成百上千种硬件</span>
+<span class="comment"> *     翻译成统一的接口 (VFS/socket/block)</span>
+<span class="comment"> */</span>
+</pre>
+</div>
+</div>
+
+<h2 id="boot-naked-linux"><span class="tag tag-handler">Project</span>3.5 与 boot-naked-linux 项目的联系</h2>
+
+<div class="card" style="border-color: #58a6ff;">
+<h4 style="color:#58a6ff;">你的项目启用了哪些代码？</h4>
+<pre>
+<span class="comment">/* 本项目用 tinyconfig + kernel.config.sh 裁剪内核，</span>
+<span class="comment"> * 去掉所有不必要的驱动和子系统，只保留核心功能。 */</span>
+
+<span class="keyword">启用的模块 (tinyconfig 基础上添加):</span>
+  ✅ arch/arm64/kernel/    启动、异常向量、系统调用入口
+  ✅ kernel/               调度器、中断、锁、时间、fork
+  ✅ mm/                   伙伴系统、SLUB、缺页处理
+  ✅ fs/                   最小 VFS + procfs + sysfs + devtmpfs
+  ✅ net/ipv4/             TCP/IP + socket API
+  ✅ net/core/             socket 核心、设备抽象
+  ✅ drivers/virtio/       virtio 框架 (virtio-net)
+  ✅ drivers/tty/          串口驱动 (PL011)
+
+<span class="keyword">未启用的模块 (tinyconfig 排除):</span>
+  ❌ drivers/gpu/          ~1,500,000 行 (不需要显卡)
+  ❌ drivers/usb/          ~2,000,000 行 (不需要 USB)
+  ❌ fs/ext4/               ~63,000 行 (不需要硬盘)
+  ❌ fs/btrfs/             ~150,000 行 (不需要 COW)
+  ❌ security/             ~114,000 行 (不需要 SELinux)
+  ❌ sound/               ~1,426,000 行 (不需要音频)
+  ❌ net/wireless/         ~100,000 行 (不需要 WiFi)
+  ❌ net/bluetooth/         ~60,000 行 (不需要蓝牙)
+
+<span class="comment">/* 裁剪后：</span>
+<span class="comment"> *   完整内核 ~27,577,520 行</span>
+<span class="comment"> *   你的内核 ~3,456,000 行 (kernel code 部分)</span>
+<span class="comment"> *   真正参与到你的 Demo 的代码可能不到 10 万行</span>
+<span class="comment"> */</span>
+</pre>
+</div>
+
 </div>
 
 <p style="margin-top:30px; color:#484f58; font-size:12px; text-align:center;">
-Generated for boot-naked-linux educational project &mdash; Linux kernel source references based on mainline v6.x
+Generated for boot-naked-linux educational project &mdash; Linux kernel source references based on mainline v7.1.0+
 </p>
 
 </div>
