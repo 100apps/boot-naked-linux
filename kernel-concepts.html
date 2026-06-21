@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux 内核本质：事件处理器 + 数据结构 | 裁判 + 管家 + 翻译官</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: #0d1117;
+  color: #c9d1d9;
+  padding: 30px;
+  line-height: 1.6;
+}
+.container { max-width: 1400px; margin: 0 auto; }
+h1 { color: #58a6ff; font-size: 28px; margin-bottom: 6px; }
+.subtitle { color: #8b949e; font-size: 14px; margin-bottom: 30px; }
+h2 {
+  color: #58a6ff; font-size: 20px; margin: 40px 0 16px;
+  border-bottom: 1px solid #21262d; padding-bottom: 8px;
+}
+h3 { color: #f0883e; font-size: 16px; margin: 24px 0 10px; }
+h4 { color: #bc8cff; font-size: 14px; margin: 16px 0 8px; }
+p { margin: 8px 0; font-size: 14px; }
+
+/* Code blocks */
+pre {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 14px;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 10px 0;
+  color: #e6edf3;
+}
+code {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+}
+.inline-code {
+  background: #1c2128;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #79c0ff;
+  font-size: 13px;
+}
+.file-path { color: #8b949e; font-style: italic; font-size: 11px; }
+.comment { color: #8b949e; }
+.keyword { color: #ff7b72; }
+.type { color: #79c0ff; }
+.func { color: #d2a8ff; }
+.string { color: #a5d6ff; }
+.number { color: #79c0ff; }
+.macro { color: #ffa657; }
+
+/* Cards grid */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 18px;
+}
+.card h4 { margin-top: 0; color: #58a6ff; }
+.card.highlight-green { border-color: #238636; }
+.card.highlight-green h4 { color: #7ee787; }
+.card.highlight-orange { border-color: #d29922; }
+.card.highlight-orange h4 { color: #e3b341; }
+.card.highlight-purple { border-color: #8957e5; }
+.card.highlight-purple h4 { color: #bc8cff; }
+.card.highlight-blue { border-color: #1f6feb; }
+.card.highlight-blue h4 { color: #58a6ff; }
+.card.highlight-red { border-color: #da3633; }
+.card.highlight-red h4 { color: #f778ba; }
+
+/* Flow diagram */
+.flow-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 12px;
+  font-family: 'SF Mono', monospace;
+}
+.flow-node {
+  padding: 4px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.flow-arrow { color: #484f58; font-size: 14px; }
+.flow-user { background: #1a3a1a; color: #7ee787; }
+.flow-syscall { background: #1a2a3a; color: #79c0ff; }
+.flow-kernel { background: #3a1a2a; color: #f778ba; }
+.flow-driver { background: #3a3a1a; color: #e3b341; }
+.flow-hw { background: #2a1a3a; color: #bc8cff; }
+
+/* Struct field table */
+.struct-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 8px 0;
+  font-family: 'SF Mono', monospace;
+}
+.struct-table th {
+  background: #21262d;
+  color: #8b949e;
+  text-align: left;
+  padding: 6px 10px;
+  font-weight: normal;
+  border-bottom: 1px solid #30363d;
+}
+.struct-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #21262d;
+}
+.struct-table tr:hover td { background: #1c2128; }
+.field-name { color: #79c0ff; }
+.field-type { color: #ffa657; }
+.field-desc { color: #8b949e; }
+
+/* Section divider */
+.part-divider {
+  background: linear-gradient(90deg, #1f6feb 0%, #8957e5 50%, #da3633 100%);
+  height: 3px;
+  margin: 50px 0 30px;
+  border-radius: 2px;
+}
+.part-title {
+  font-size: 24px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+.part-subtitle { color: #8b949e; font-size: 14px; margin-bottom: 20px; }
+
+/* Tag labels */
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: bold;
+  margin-right: 6px;
+}
+.tag-referee { background: #1a3a1a; color: #7ee787; }
+.tag-steward { background: #3a3a1a; color: #e3b341; }
+.tag-translator { background: #1a2a3a; color: #79c0ff; }
+.tag-handler { background: #3a1a2a; color: #f778ba; }
+.tag-data { background: #2a1a3a; color: #bc8cff; }
+
+/* Nav TOC */
+.toc {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0 30px;
+}
+.toc h3 { margin-top: 0; color: #58a6ff; }
+.toc ul { list-style: none; padding-left: 0; }
+.toc li { margin: 4px 0; }
+.toc a { color: #79c0ff; text-decoration: none; font-size: 13px; }
+.toc a:hover { text-decoration: underline; }
+.toc .indent { padding-left: 20px; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } .cards-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Linux 内核本质</h1>
+<p class="subtitle">基于 boot-naked-linux 项目 (ARM64/QEMU) &mdash; 从源码理解内核的两大视角</p>
+
+<nav class="toc">
+<h3>目录</h3>
+<ul>
+  <li><strong>第一部分：内核 = 事件处理器 + 数据结构</strong></li>
+  <li class="indent"><a href="#syscall">1.1 系统调用处理 (System Call Handler)</a></li>
+  <li class="indent"><a href="#interrupt">1.2 中断处理 (Interrupt Handler)</a></li>
+  <li class="indent"><a href="#exception">1.3 异常处理 (Exception Handler)</a></li>
+  <li class="indent"><a href="#task-struct">1.4 task_struct &mdash; 进程描述符</a></li>
+  <li class="indent"><a href="#mm-struct">1.5 mm_struct &mdash; 内存描述符</a></li>
+  <li class="indent"><a href="#files-struct">1.6 files_struct / fdtable &mdash; 文件描述符表</a></li>
+  <li class="indent"><a href="#struct-file">1.7 struct file &mdash; 文件对象</a></li>
+  <li class="indent"><a href="#struct-sock">1.8 struct sock &mdash; 套接字对象</a></li>
+  <li class="indent"><a href="#struct-skbuff">1.9 struct sk_buff &mdash; 网络缓冲区</a></li>
+  <li class="indent"><a href="#struct-page">1.10 struct page &mdash; 物理页描述符</a></li>
+  <li><strong>第二部分：内核 = 裁判 + 管家 + 翻译官</strong></li>
+  <li class="indent"><a href="#referee">2.1 裁判 (Referee) &mdash; 规则与公平</a></li>
+  <li class="indent"><a href="#steward">2.2 管家 (Steward) &mdash; 资源管理</a></li>
+  <li class="indent"><a href="#translator">2.3 翻译官 (Translator) &mdash; 硬件抽象</a></li>
+</ul>
+</nav>
+
+<!-- ============================================================ -->
+<!-- PART 1 -->
+<!-- ============================================================ -->
+<div class="part-divider"></div>
+<div class="part-title" style="color:#f778ba;">第一部分：内核 = 事件处理器 + 数据结构</div>
+<p class="part-subtitle">内核本质上是一个被动的事件驱动系统：等待事件发生，然后操作数据结构来响应。</p>
+
+<!-- ==================== 1.1 SYSCALL ==================== -->
+<h2 id="syscall"><span class="tag tag-handler">Handler</span>1.1 系统调用处理 (System Call Handler)</h2>
+
+<p>用户程序通过 <code class="inline-code">svc</code> 指令触发同步异常，CPU 从 EL0 跳转到 EL1 的异常向量表。以下是 ARM64 上完整的系统调用入口链路：</p>
+
+<h3>完整调用链</h3>
+<div class="flow-chain">
+  <span class="flow-node flow-user">用户态: svc #0</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-hw">vectors[] (entry.S:519)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">el0t_64_sync (entry.S:598)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">el0t_64_sync_handler (entry-common.c)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">do_el0_svc (syscall.c:149)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">el0_svc_common (syscall.c:73)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">invoke_syscall (syscall.c:38)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-syscall">sys_call_table[nr]</span>
+</div>
+
+<h3>异常向量表</h3>
+<p class="file-path">linux-src/arch/arm64/kernel/entry.S : 519-540</p>
+<pre>
+<span class="comment">// ARM64 异常向量表 — 每种异常类型占 128 字节对齐</span>
+<span class="macro">SYM_CODE_START</span>(vectors)
+    <span class="comment">// EL0, AArch64</span>
+    kernel_ventry  0, t, 64, sync     <span class="comment">// 同步异常 (含 syscall)</span>
+    kernel_ventry  0, t, 64, irq      <span class="comment">// IRQ 中断</span>
+    kernel_ventry  0, t, 64, fiq      <span class="comment">// FIQ</span>
+    kernel_ventry  0, t, 64, error    <span class="comment">// SError</span>
+    <span class="comment">// ... EL1 entries follow ...</span>
+<span class="macro">SYM_CODE_END</span>(vectors)
+</pre>
+
+<h3>el0t_64_sync 汇编入口</h3>
+<p class="file-path">linux-src/arch/arm64/kernel/entry.S : 598 (宏展开)</p>
+<pre>
+<span class="comment">// entry_handler 0, t, 64, sync 的宏展开：</span>
+<span class="macro">SYM_CODE_START_LOCAL</span>(el0t_64_sync)
+    kernel_entry 0, 64           <span class="comment">// 保存用户寄存器到 pt_regs (内核栈)</span>
+    mov x0, sp                   <span class="comment">// x0 = &pt_regs</span>
+    bl  el0t_64_sync_handler     <span class="comment">// 跳转到 C 语言处理函数</span>
+    b   ret_to_user              <span class="comment">// 返回用户空间</span>
+<span class="macro">SYM_CODE_END</span>(el0t_64_sync)
+</pre>
+
+<h3>do_el0_svc &amp; invoke_syscall</h3>
+<p class="file-path">linux-src/arch/arm64/kernel/syscall.c</p>
+<pre>
+<span class="comment">// Line 149 — SVC 入口</span>
+<span class="keyword">void</span> <span class="func">do_el0_svc</span>(<span class="keyword">struct</span> pt_regs *regs)
+{
+    <span class="comment">// regs[8] = 系统调用号 (x8 寄存器), sys_call_table 是函数指针数组</span>
+    el0_svc_common(regs, regs->regs[<span class="number">8</span>], __NR_syscalls, sys_call_table);
+}
+
+<span class="comment">// Line 73 — 公共处理逻辑</span>
+<span class="keyword">static void</span> <span class="func">el0_svc_common</span>(<span class="keyword">struct</span> pt_regs *regs, <span class="keyword">int</span> scno,
+                           <span class="keyword">int</span> sc_nr, <span class="keyword">const</span> syscall_fn_t syscall_table[])
+{
+    regs->orig_x0 = regs->regs[<span class="number">0</span>];
+    regs->syscallno = scno;
+    <span class="comment">// ... ptrace/seccomp 钩子检查 ...</span>
+    invoke_syscall(regs, scno, sc_nr, syscall_table);  <span class="comment">// Line 132</span>
+}
+
+<span class="comment">// Line 38 — 查表分发</span>
+<span class="keyword">static void</span> <span class="func">invoke_syscall</span>(<span class="keyword">struct</span> pt_regs *regs, <span class="keyword">unsigned int</span> scno,
+                          <span class="keyword">unsigned int</span> sc_nr,
+                          <span class="keyword">const</span> syscall_fn_t syscall_table[])
+{
+    <span class="keyword">if</span> (scno &lt; sc_nr) {
+        syscall_fn_t syscall_fn;
+        <span class="comment">// array_index_nospec 防止 Spectre v1 越界读取</span>
+        syscall_fn = syscall_table[array_index_nospec(scno, sc_nr)];
+        ret = __invoke_syscall(regs, syscall_fn);
+    } <span class="keyword">else</span> {
+        ret = do_ni_syscall(regs, scno);  <span class="comment">// 未实现的系统调用</span>
+    }
+    syscall_set_return_value(current, regs, <span class="number">0</span>, ret);
+}
+</pre>
+
+<h3>sys_call_table 定义</h3>
+<p class="file-path">linux-src/arch/arm64/kernel/sys.c : 58-62</p>
+<pre>
+<span class="comment">// 所有条目默认指向 ni_syscall (Not Implemented)，再覆盖有效编号</span>
+<span class="keyword">const</span> syscall_fn_t sys_call_table[__NR_syscalls] = {
+    [<span class="number">0</span> ... __NR_syscalls - <span class="number">1</span>] = __arm64_sys_ni_syscall,
+<span class="macro">#include</span> &lt;asm/syscall_table_64.h&gt;
+};
+
+<span class="comment">// syscall_table_64.h 由脚本自动生成，内容类似：</span>
+<span class="comment">// [__NR_read]    = __arm64_sys_read,</span>
+<span class="comment">// [__NR_write]   = __arm64_sys_write,</span>
+<span class="comment">// [__NR_connect] = __arm64_sys_connect,</span>
+<span class="comment">// [__NR_openat]  = __arm64_sys_openat,</span>
+</pre>
+
+<h3>典型系统调用实现示例</h3>
+<div class="cards-grid">
+<div class="card highlight-blue">
+<h4>__arm64_sys_write</h4>
+<p class="file-path">fs/read_write.c → ksys_write()</p>
+<pre>
+<span class="keyword">ssize_t</span> <span class="func">ksys_write</span>(<span class="keyword">unsigned int</span> fd,
+                   <span class="keyword">const char</span> __user *buf,
+                   <span class="type">size_t</span> count)
+{
+    <span class="keyword">struct</span> fd f = fdget_pos(fd);
+    <span class="keyword">if</span> (fd_file(f)) {
+        ret = vfs_write(fd_file(f), buf, count, &amp;pos);
+        fdput_pos(f);
+    }
+    <span class="keyword">return</span> ret;
+}
+</pre>
+</div>
+<div class="card highlight-green">
+<h4>__arm64_sys_read</h4>
+<p class="file-path">fs/read_write.c → ksys_read()</p>
+<pre>
+<span class="keyword">ssize_t</span> <span class="func">ksys_read</span>(<span class="keyword">unsigned int</span> fd,
+                  <span class="keyword">char</span> __user *buf,
+                  <span class="type">size_t</span> count)
+{
+    <span class="keyword">struct</span> fd f = fdget_pos(fd);
+    <span class="keyword">if</span> (fd_file(f)) {
+        ret = vfs_read(fd_file(f), buf, count, &amp;pos);
+        fdput_pos(f);
+    }
+    <span class="keyword">return</span> ret;
+}
+</pre>
+</div>
+<div class="card highlight-purple">
+<h4>__arm64_sys_connect</h4>
+<p class="file-path">net/socket.c → __sys_connect()</p>
+<pre>
+<span class="keyword">int</span> <span class="func">__sys_connect</span>(<span class="keyword">int</span> fd,
+                  <span class="keyword">struct</span> sockaddr __user *uservaddr,
+                  <span class="keyword">int</span> addrlen)
+{
+    sock = sockfd_lookup_light(fd, &amp;err, &amp;fput_needed);
+    err = security_socket_connect(sock, ...);
+    err = sock->ops->connect(sock, ...);
+    <span class="comment">// → inet_stream_connect → tcp_v4_connect</span>
+    <span class="keyword">return</span> err;
+}
+</pre>
+</div>
+</div>
+
+<!-- ==================== 1.2 INTERRUPT ==================== -->
+<h2 id="interrupt"><span class="tag tag-handler">Handler</span>1.2 中断处理 (Interrupt Handler)</h2>
+
+<p>硬件中断通过 GIC (Generic Interrupt Controller) 分发到 CPU。ARM64 的 IRQ 向量最终调用 <code class="inline-code">handle_arch_irq</code> 函数指针，该指针在 GIC 初始化时被设置为 <code class="inline-code">gic_handle_irq</code>。</p>
+
+<h3>IRQ 调用链</h3>
+<div class="flow-chain">
+  <span class="flow-node flow-hw">GIC 硬件</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">el0t_64_irq (entry.S)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">handle_arch_irq (irq.c:100)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">gic_handle_irq (irq-gic-v3.c:955)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">generic_handle_domain_irq()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-driver">设备 ISR</span>
+</div>
+
+<h3>GIC v3 中断控制器</h3>
+<p class="file-path">linux-src/drivers/irqchip/irq-gic-v3.c</p>
+<pre>
+<span class="comment">// Line 955 — GIC 注册的顶层 IRQ 处理函数</span>
+<span class="keyword">static void</span> __exception_irq_entry <span class="func">gic_handle_irq</span>(<span class="keyword">struct</span> pt_regs *regs)
+{
+    u32 irqnr = gic_read_iar();  <span class="comment">// 从 GIC 读取中断号</span>
+    <span class="keyword">if</span> (gic_irqnr_is_special(irqnr))
+        <span class="keyword">return</span>;                 <span class="comment">// Spurious / EOI</span>
+    gic_complete_ack(irqnr);    <span class="comment">// 向 GIC 确认中断</span>
+    generic_handle_domain_irq(gic_data.domain, irqnr);
+}
+</pre>
+
+<h3>Virtio-net 中断 → NAPI → TCP 收包链</h3>
+<div class="flow-chain">
+  <span class="flow-node flow-driver">virtnet_interrupt (virtio_net.c)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">napi_schedule()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">virtnet_poll (virtio_net.c:2838)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">virtnet_receive()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">napi_gro_receive()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">tcp_v4_rcv()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">sk_add_backlog() / sk_data_ready()</span>
+</div>
+
+<p class="file-path">linux-src/drivers/net/virtio_net.c : 2838</p>
+<pre>
+<span class="keyword">static int</span> <span class="func">virtnet_poll</span>(<span class="keyword">struct</span> napi_struct *napi, <span class="keyword">int</span> budget)
+{
+    <span class="keyword">struct</span> receive_queue *rq = container_of(napi, <span class="keyword">struct</span> receive_queue, napi);
+    virtnet_poll_cleantx(rq, budget);
+    received = virtnet_receive(rq, budget, &amp;xdp_xmit);
+    <span class="keyword">if</span> (received &lt; budget)
+        virtqueue_napi_complete(napi, rq->vq, received);
+    <span class="keyword">return</span> received;
+}
+</pre>
+
+<p><strong>NAPI 机制要点：</strong>中断只负责调度 NAPI poll，不在中断上下文中直接处理数据包。这避免了高流量下频繁中断导致的 "活锁"（livelock）。poll 函数以 batch 方式处理多个包，完成后才重新开启中断。</p>
+
+<!-- ==================== 1.3 EXCEPTION ==================== -->
+<h2 id="exception"><span class="tag tag-handler">Handler</span>1.3 异常处理 (Exception Handler)</h2>
+
+<h3>缺页异常 (Page Fault) 处理流程</h3>
+<div class="flow-chain">
+  <span class="flow-node flow-hw">MMU 触发 Permission Fault</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">el0t_64_sync (ESR 标识为 fault)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">do_page_fault (fault.c:521)</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">handle_mm_fault()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">handle_pte_fault()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">do_anonymous_page() 或 wp_page_copy()</span>
+</div>
+
+<p class="file-path">linux-src/arch/arm64/mm/fault.c : 521</p>
+<pre>
+<span class="keyword">static int</span> __kprobes <span class="func">do_page_fault</span>(<span class="keyword">unsigned long</span> far,
+                                   <span class="keyword">unsigned long</span> esr,
+                                   <span class="keyword">struct</span> pt_regs *regs)
+{
+    <span class="keyword">struct</span> mm_struct *mm = current->mm;
+    <span class="keyword">unsigned long</span> addr = untagged_addr(far);
+
+    <span class="comment">// 根据 ESR 判断故障类型</span>
+    <span class="keyword">if</span> (is_el0_instruction_abort(esr))   vm_flags = VM_EXEC;
+    <span class="keyword">else if</span> (is_write_abort(esr))        vm_flags = VM_WRITE;
+    <span class="keyword">else</span>                                 vm_flags = VM_READ | VM_WRITE;
+
+    <span class="comment">// 查找 VMA，验证访问权限，然后调用 handle_mm_fault()</span>
+    vma = lock_mm_and_find_vma(mm, addr, regs);
+    fault = handle_mm_fault(vma, addr, mm_flags, regs);
+}
+</pre>
+
+<h3>匿名页分配 (Demand Paging)</h3>
+<p class="file-path">linux-src/mm/memory.c : 4735</p>
+<pre>
+<span class="keyword">static</span> vm_fault_t <span class="func">do_anonymous_page</span>(<span class="keyword">struct</span> vm_fault *vmf)
+{
+    <span class="comment">// 读访问 → 映射零页 (Zero Page)，节省物理内存</span>
+    <span class="keyword">if</span> (!(vmf->flags &amp; FAULT_FLAG_WRITE) &amp;&amp; !mm_forbids_zeropage(vma->vm_mm)) {
+        entry = pte_mkspecial(pfn_pte(my_zero_pfn(vmf->address), vma->vm_page_prot));
+        <span class="keyword">goto</span> setpte;
+    }
+    <span class="comment">// 写访问 → 分配真实物理页</span>
+    folio = alloc_anon_folio(vmf);
+    <span class="comment">// ... 建立 PTE、加入反向映射 ...</span>
+}
+</pre>
+
+<h3>COW (Copy-on-Write) 机制</h3>
+<p class="file-path">linux-src/mm/memory.c : 3331</p>
+<pre>
+<span class="comment">// fork() 时父子共享页面，PTE 标记为只读</span>
+<span class="comment">// 当任一方写入时触发写保护异常 → wp_page_copy()</span>
+
+<span class="keyword">static</span> vm_fault_t <span class="func">wp_page_copy</span>(<span class="keyword">struct</span> vm_fault *vmf)
+{
+    <span class="comment">// 1. 分配新物理页</span>
+    new_folio = folio_prealloc(mm, vma, vmf->address, pfn_is_zero);
+
+    <span class="comment">// 2. 拷贝旧页内容到新页</span>
+    err = __wp_page_copy_user(&amp;new_folio->page, vmf->page, vmf);
+
+    <span class="comment">// 3. 更新 PTE 指向新页，设为可写</span>
+    <span class="comment">// 4. 刷新 TLB，更新反向映射</span>
+}
+</pre>
+
+<div class="card highlight-orange" style="margin-top:16px;">
+<h4>COW 时序图</h4>
+<pre>
+fork() 之后:
+  Parent PTE ──→ [Page A] ←── Child PTE   (两者都只读)
+
+Parent 写入 Page A:
+  1. MMU 触发 Write Fault
+  2. wp_page_copy() 分配 [Page B]
+  3. 拷贝 A → B
+  4. Parent PTE ──→ [Page B] (可写)
+     Child  PTE ──→ [Page A] (仍只读)
+</pre>
+</div>
+
+<!-- ==================== DATA STRUCTURES ==================== -->
+<h2 id="data-structures"><span class="tag tag-data">Data</span>核心数据结构总览</h2>
+<p>内核的数据结构围绕 "进程" 这一中心概念组织。每个进程用一个 <code class="inline-code">task_struct</code> 描述，它引用了内存、文件、信号等子系统的数据结构。</p>
+
+<!-- 1.4 task_struct -->
+<h3 id="task-struct">1.4 task_struct &mdash; 进程描述符</h3>
+<p class="file-path">linux-src/include/linux/sched.h : 785+</p>
+<p>内核中最重要的数据结构，约 6KB，包含了进程的一切信息。通过 <code class="inline-code">current</code> 宏获取当前进程的 task_struct（存储在 per-CPU 变量或 thread_info 中）。</p>
+
+<table class="struct-table">
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td class="field-name">thread_info</td><td class="field-type">struct thread_info</td><td class="field-desc">必须位于首位；包含 preempt_count、addr_limit</td></tr>
+<tr><td class="field-name">__state</td><td class="field-type">unsigned int</td><td class="field-desc">TASK_RUNNING / TASK_INTERRUPTIBLE / TASK_UNINTERRUPTIBLE / TASK_STOPPED</td></tr>
+<tr><td class="field-name">se</td><td class="field-type">struct sched_entity</td><td class="field-desc">CFS 调度实体 (vruntime, rb_node)</td></tr>
+<tr><td class="field-name">sched_class</td><td class="field-type">const struct sched_class *</td><td class="field-desc">调度策略 (fair_sched_class / rt_sched_class)</td></tr>
+<tr><td class="field-name">mm</td><td class="field-type">struct mm_struct *</td><td class="field-desc">用户空间内存描述符 (内核线程为 NULL)</td></tr>
+<tr><td class="field-name">pid</td><td class="field-type">pid_t</td><td class="field-desc">进程 ID (实际是 TGID)</td></tr>
+<tr><td class="field-name">real_parent</td><td class="field-type">struct task_struct *</td><td class="field-desc">生物学父进程</td></tr>
+<tr><td class="field-name">children</td><td class="field-type">struct list_head</td><td class="field-desc">子进程链表</td></tr>
+<tr><td class="field-name">cred</td><td class="field-type">const struct cred *</td><td class="field-desc">有效凭证 (uid/gid/capabilities)</td></tr>
+<tr><td class="field-name">comm</td><td class="field-type">char[16]</td><td class="field-desc">可执行文件名</td></tr>
+<tr><td class="field-name">fs</td><td class="field-type">struct fs_struct *</td><td class="field-desc">文件系统信息 (cwd, root, umask)</td></tr>
+<tr><td class="field-name">files</td><td class="field-type">struct files_struct *</td><td class="field-desc">打开的文件描述符表</td></tr>
+<tr><td class="field-name">signal</td><td class="field-type">struct signal_struct *</td><td class="field-desc">信号处理相关 (线程组共享)</td></tr>
+<tr><td class="field-name">sighand</td><td class="field-type">struct sighand_struct *</td><td class="field-desc">信号处理函数表</td></tr>
+</table>
+
+<div class="card highlight-blue" style="margin-top:12px;">
+<h4>task_struct 的组织方式</h4>
+<pre>
+<strong>链表组织：</strong>
+  task_struct.children  ←→  sibling 链表 (同一父进程的子进程)
+  task_struct.real_parent  →  父进程
+
+<strong>PID 查找：</strong>
+  pid_hash / PID namespace IDR → struct pid → task_struct
+  find_task_by_vpid(pid) 用于快速查找
+
+<strong>遍历所有进程：</strong>
+  for_each_process(p)  ← 遍历 init_task.tasks 双向循环链表
+</pre>
+</div>
+
+<!-- 1.5 mm_struct -->
+<h3 id="mm-struct">1.5 mm_struct &mdash; 内存描述符</h3>
+<p class="file-path">linux-src/include/linux/mm_types.h : 790+</p>
+<p>描述一个进程的虚拟地址空间布局。每个进程有且仅有一个 mm_struct（CLONE_VM 共享除外）。</p>
+
+<table class="struct-table">
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td class="field-name">mm_mt</td><td class="field-type">struct maple_tree</td><td class="field-desc">VMA 存储 (替代了旧的 mmap 红黑树)</td></tr>
+<tr><td class="field-name">pgd</td><td class="field-type">pgd_t *</td><td class="field-desc">页全局目录指针 (顶级页表)</td></tr>
+<tr><td class="field-name">mm_users</td><td class="field-type">atomic_t</td><td class="field-desc">用户空间引用计数</td></tr>
+<tr><td class="field-name">mm_count</td><td class="field-type">atomic_t</td><td class="field-desc">内核引用计数</td></tr>
+<tr><td class="field-name">mmap_lock</td><td class="field-type">struct rw_semaphore</td><td class="field-desc">保护 VMA 树的读写锁</td></tr>
+<tr><td class="field-name">start_code / end_code</td><td class="field-type">unsigned long</td><td class="field-desc">代码段起止地址</td></tr>
+<tr><td class="field-name">start_data / end_data</td><td class="field-type">unsigned long</td><td class="field-desc">数据段起止地址</td></tr>
+<tr><td class="field-name">start_brk / brk</td><td class="field-type">unsigned long</td><td class="field-desc">堆区起止地址 (brk 系统调用扩展)</td></tr>
+<tr><td class="field-name">start_stack</td><td class="field-type">unsigned long</td><td class="field-desc">初始栈地址</td></tr>
+<tr><td class="field-name">arg_start / arg_end</td><td class="field-type">unsigned long</td><td class="field-desc">命令行参数区域</td></tr>
+<tr><td class="field-name">total_vm</td><td class="field-type">unsigned long</td><td class="field-desc">总映射页数</td></tr>
+</table>
+
+<div class="card highlight-green" style="margin-top:12px;">
+<h4>进程地址空间布局 (ARM64)</h4>
+<pre>
+0x0000_0000_0000_0000  ┌──────────────┐
+                      │  ELF Header  │  start_code
+                      ├──────────────┤
+                      │   .text      │  end_code
+                      ├──────────────┤
+                      │   .data/.bss │  start_data → end_data
+                      ├──────────────┤
+                      │   Heap ↑     │  start_brk → brk
+                      │              │
+                      │   mmap ↓     │  mmap_base
+                      ├──────────────┤
+                      │   Stack      │  start_stack
+0x0000_FFFF_FFFF_FFFF └──────────────┘  ← 用户空间上限
+                        (hole)
+0xFFFF_0000_0000_0000  ┌──────────────┐
+                      │  Kernel Space │
+0xFFFF_FFFF_FFFF_FFFF └──────────────┘
+</pre>
+</div>
+
+<!-- 1.6 files_struct -->
+<h3 id="files-struct">1.6 files_struct / fdtable &mdash; 文件描述符表</h3>
+<p class="file-path">linux-src/include/linux/fdtable.h</p>
+
+<pre>
+<span class="comment">// 文件描述符表 — 两层结构</span>
+<span class="keyword">struct</span> <span class="type">fdtable</span> {
+    <span class="keyword">unsigned int</span>     max_fds;           <span class="comment">// 最大 fd 数量</span>
+    <span class="keyword">struct</span> file __rcu **fd;             <span class="comment">// fd → struct file* 数组</span>
+    <span class="keyword">unsigned long</span>   *close_on_exec;    <span class="comment">// exec 时关闭标志位图</span>
+    <span class="keyword">unsigned long</span>   *open_fds;         <span class="comment">// 已使用 fd 位图</span>
+    <span class="keyword">unsigned long</span>   *full_fds_bits;    <span class="comment">// 满的 fd 区间位图 (加速查找)</span>
+};
+
+<span class="keyword">struct</span> <span class="type">files_struct</span> {
+    atomic_t          count;            <span class="comment">// 引用计数</span>
+    <span class="keyword">struct</span> fdtable __rcu *fdt;          <span class="comment">// 指向 fdtab 或动态分配的 fdtable</span>
+    <span class="keyword">struct</span> fdtable    fdtab;            <span class="comment">// 内嵌默认小表 (避免首次分配)</span>
+    spinlock_t        file_lock;        <span class="comment">// 并发保护</span>
+    <span class="keyword">unsigned int</span>      next_fd;          <span class="comment">// 下一个可用 fd 缓存</span>
+    <span class="keyword">struct</span> file __rcu *fd_array[NR_OPEN_DEFAULT]; <span class="comment">// 内联小数组 (通常 64)</span>
+};
+</pre>
+
+<div class="card highlight-orange" style="margin-top:12px;">
+<h4>FD 分配算法</h4>
+<p class="file-path">linux-src/fs/file.c : get_unused_fd_flags()</p>
+<pre>
+int get_unused_fd_flags(unsigned flags)
+{
+    return __get_unused_fd_flags(flags, rlimit(RLIMIT_NOFILE));
+}
+
+// alloc_fd() 核心逻辑:
+// 1. 用 full_fds_bits 位图跳过已满的 64-fd 区间
+// 2. 用 open_fds 位图在目标区间找第一个 0 bit
+// 3. 如果找不到，expand_fdtable() 扩容
+// 4. 设置 open_fds 对应 bit，返回 fd 号
+// → O(1) 平均时间复杂度找到最低可用 fd
+</pre>
+</div>
+
+<!-- 1.7 struct file -->
+<h3 id="struct-file">1.7 struct file &mdash; 文件对象</h3>
+<p class="file-path">linux-src/include/linux/fs.h : 1032+</p>
+<p>每次 <code class="inline-code">open()</code> 创建一个 struct file，代表一次 "打开的文件实例"。多个 fd 可以指向同一个 struct file（dup/dup2），多个 struct file 可以指向同一个 inode。</p>
+
+<table class="struct-table">
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td class="field-name">f_op</td><td class="field-type">const struct file_operations *</td><td class="field-desc">操作函数表 (read/write/ioctl/mmap/poll...)</td></tr>
+<tr><td class="field-name">f_pos</td><td class="field-type">loff_t</td><td class="field-desc">当前读写位置</td></tr>
+<tr><td class="field-name">f_flags</td><td class="field-type">unsigned int</td><td class="field-desc">O_RDONLY / O_NONBLOCK / O_APPEND 等</td></tr>
+<tr><td class="field-name">f_mode</td><td class="field-type">fmode_t</td><td class="field-desc">FMODE_READ / FMODE_WRITE / FMODE_CAN_WRITE</td></tr>
+<tr><td class="field-name">private_data</td><td class="field-type">void *</td><td class="field-desc">驱动/文件系统私有数据 (如 socket → struct socket*)</td></tr>
+<tr><td class="field-name">f_inode</td><td class="field-type">struct inode *</td><td class="field-desc">关联的 inode</td></tr>
+<tr><td class="field-name">f_path</td><td class="field-type">struct path</td><td class="field-desc">dentry + vfsmount (路径信息)</td></tr>
+<tr><td class="field-name">f_count</td><td class="field-type">atomic_long_t</td><td class="field-desc">引用计数</td></tr>
+<tr><td class="field-name">f_cred</td><td class="field-type">const struct cred *</td><td class="field-desc">打开时的凭证快照</td></tr>
+</table>
+
+<!-- 1.8 struct sock -->
+<h3 id="struct-sock">1.8 struct sock &mdash; 套接字对象</h3>
+<p class="file-path">linux-src/include/net/sock.h : 342+</p>
+<p>网络协议层的通用套接字表示。TCP/UDP/Unix domain socket 都继承此结构（通过嵌入或容器继承）。</p>
+
+<table class="struct-table">
+<tr><th>字段</th><th>类型</th><th>说明</th></tr>
+<tr><td class="field-name">sk_state</td><td class="field-type">int (__sk_common.skc_state)</td><td class="field-desc">TCP_ESTABLISHED / TCP_SYN_SENT / TCP_CLOSE_WAIT...</td></tr>
+<tr><td class="field-name">sk_prot</td><td class="field-type">struct proto * (__sk_common.skc_prot)</td><td class="field-desc">协议操作表 (tcp_prot / udp_prot)</td></tr>
+<tr><td class="field-name">sk_receive_queue</td><td class="field-type">struct sk_buff_head</td><td class="field-desc">接收队列 (已排序待读取的包)</td></tr>
+<tr><td class="field-name">sk_wq</td><td class="field-type">struct socket_wq *</td><td class="field-desc">等待队列 (select/poll/epoll 注册点)</td></tr>
+<tr><td class="field-name">sk_rcvbuf</td><td class="field-type">int</td><td class="field-desc">接收缓冲区大小限制</td></tr>
+<tr><td class="field-name">sk_sndbuf</td><td class="field-type">int</td><td class="field-desc">发送缓冲区大小限制</td></tr>
+<tr><td class="field-name">sk_send_head</td><td class="field-type">struct sk_buff *</td><td class="field-desc">发送队列头</td></tr>
+<tr><td class="field-name">sk_backlog</td><td class="field-type">struct sk_buff_head</td><td class="field-desc">软中断积压队列</td></tr>
+<tr><td class="field-name">sk_err</td><td class="field-type">int</td><td class="field-desc">最近错误码</td></tr>
+<tr><td class="field-name">sk_filter</td><td class="field-type">struct sk_filter *</td><td class="field-desc">BPF 过滤器</td></tr>
+</table>
+
+<!-- 1.9 sk_buff -->
+<h3 id="struct-skbuff">1.9 struct sk_buff &mdash; 网络缓冲区</h3>
+<p class="file-path">linux-src/include/linux/skbuff.h : 866+</p>
+<p>网络栈的核心数据包载体。每一层协议都在 sk_buff 中添加或剥离头部，数据本身不会被拷贝（零拷贝设计）。</p>
+
+<pre>
+<span class="keyword">struct</span> <span class="type">sk_buff</span> {
+    <span class="comment">// 链表节点 (用于挂入各种队列)</span>
+    <span class="keyword">struct</span> sk_buff      *next, *prev;
+    <span class="keyword">struct</span> net_device   *dev;          <span class="comment">// 关联的网络设备</span>
+    <span class="keyword">struct</span> sock         *sk;           <span class="comment">// 关联的套接字</span>
+    ktime_t              tstamp;       <span class="comment">// 时间戳</span>
+    <span class="keyword">char</span>                 cb[<span class="number">48</span>];       <span class="comment">// 控制块 — 每层协议的私有数据区</span>
+    <span class="keyword">unsigned int</span>         len;          <span class="comment">// 总长度 (含所有头)</span>
+    <span class="keyword">unsigned int</span>         data_len;     <span class="comment">// 分片中的数据长度</span>
+
+    <span class="comment">// 关键指针 — 指向 skb 线性数据区的不同位置:</span>
+    <span class="comment">//   head ─── headroom ─── data ─── payload ─── tail ─── end</span>
+    <span class="keyword">unsigned char</span>       *head;         <span class="comment">// 分配的数据区起始</span>
+    <span class="keyword">unsigned char</span>       *data;         <span class="comment">// 当前有效数据起始 (skb_push/skb_pull 移动)</span>
+    <span class="keyword">unsigned char</span>       *tail;         <span class="comment">// 当前有效数据结束</span>
+    <span class="keyword">unsigned char</span>       *end;          <span class="comment">// 分配的数据区结束</span>
+
+    <span class="comment">// 各层头部偏移</span>
+    __u16                mac_header;   <span class="comment">// L2 头偏移</span>
+    __u16                network_header;<span class="comment">// L3 头偏移</span>
+    __u16                transport_header;<span class="comment">// L4 头偏移</span>
+};
+</pre>
+
+<div class="card highlight-purple" style="margin-top:12px;">
+<h4>sk_buff 数据流动示意</h4>
+<pre>
+收到以太网帧时:
+  ┌──────┬──────────┬─────────┬─────────┐
+  │ ETH  │ IP Header│TCP Hdr  │ Payload │
+  └──────┴──────────┴─────────┴─────────┘
+  ^mac   ^network  ^transport ^data     ^tail
+
+传给 TCP 层后 (skb_pull 去掉下层头):
+  ┌─────────┬─────────┐
+  │TCP Hdr  │ Payload │
+  └─────────┴─────────┘
+            ^data     ^tail
+
+发送时 (skb_push 逐层加头):
+  ┌──────┬──────────┬─────────┬─────────┐
+  │ ETH  │ IP Header│TCP Hdr  │ Payload │
+  └──────┴──────────┴─────────┴─────────┘
+</pre>
+</div>
+
+<!-- 1.10 struct page -->
+<h3 id="struct-page">1.10 struct page &mdash; 物理页描述符</h3>
+<p class="file-path">linux-src/include/linux/mm_types.h : 72+</p>
+<p>系统中每个物理页都有一个对应的 struct page。对于 4GB 内存、4KB 页大小，约有 1M 个 struct page，占用约 64MB。</p>
+
+<pre>
+<span class="keyword">struct</span> <span class="type">page</span> {
+    <span class="keyword">unsigned long</span>  flags;          <span class="comment">// PG_locked, PG_dirty, PG_slab, PG_active...</span>
+    <span class="keyword">union</span> {
+        <span class="keyword">struct</span> {                   <span class="comment">// 页缓存 / 匿名页</span>
+            <span class="keyword">struct</span> list_head lru;  <span class="comment">// LRU 链表节点</span>
+            <span class="keyword">struct</span> address_space *mapping; <span class="comment">// 所属的地址空间</span>
+            pgoff_t index;         <span class="comment">// 在 mapping 中的偏移</span>
+            <span class="keyword">unsigned long</span> private; <span class="comment">// buddy order / swp_entry / buffer_heads</span>
+        };
+        <span class="keyword">struct</span> {                   <span class="comment">// page_pool (网络栈零拷贝)</span>
+            <span class="keyword">unsigned long</span> pp_magic;
+            <span class="keyword">struct</span> page_pool *pp;
+            <span class="keyword">unsigned long</span> dma_addr;
+        };
+        <span class="keyword">struct</span> {                   <span class="comment">// compound page 的尾页</span>
+            <span class="keyword">unsigned long</span> compound_head; <span class="comment">// bit 0 = 1 表示尾页</span>
+        };
+    };
+    <span class="keyword">union</span> {
+        <span class="keyword">unsigned int</span> page_type;    <span class="comment">// 页面类型标识</span>
+        atomic_t _mapcount;        <span class="comment">// 页表引用计数 (-1 based)</span>
+    };
+    atomic_t _refcount;            <span class="comment">// 使用引用计数</span>
+};
+</pre>
+
+<!-- ============================================================ -->
+<!-- PART 2 -->
+<!-- ============================================================ -->
+<div class="part-divider"></div>
+<div class="part-title" style="color:#7ee787;">第二部分：内核 = 裁判 + 管家 + 翻译官</div>
+<p class="part-subtitle">从功能角色理解内核的三个核心职责。</p>
+
+<!-- ==================== 2.1 REFEREE ==================== -->
+<h2 id="referee"><span class="tag tag-referee">Referee</span>2.1 裁判 &mdash; 强制执行规则与公平</h2>
+
+<h3>2.1.1 CPU 调度 &mdash; CFS (Completely Fair Scheduler)</h3>
+<p>CFS 的核心思想：<strong>每个进程获得与其权重成比例的 CPU 时间</strong>。通过维护一个 "虚拟运行时间" (vruntime) 来实现公平性。</p>
+
+<div class="cards-grid">
+<div class="card highlight-green">
+<h4>sched_entity &mdash; 调度实体</h4>
+<p class="file-path">linux-src/include/linux/sched.h : 541</p>
+<pre>
+<span class="keyword">struct</span> <span class="type">sched_entity</span> {
+    <span class="keyword">struct</span> load_weight load;   <span class="comment">// nice 值 → 权重</span>
+    <span class="keyword">struct</span> rb_node     run_node; <span class="comment">// 红黑树节点</span>
+    u64  vruntime;             <span class="comment">// ★ 虚拟运行时间</span>
+    u64  sum_exec_runtime;     <span class="comment">// 累计实际运行时间</span>
+    u64  exec_start;           <span class="comment">// 本次开始运行的时间戳</span>
+    s64  vlag;                 <span class="comment">// EEVDF 延迟追踪</span>
+    u64  slice;                <span class="comment">// 时间片长度</span>
+};
+</pre>
+</div>
+<div class="card highlight-green">
+<h4>cfs_rq &mdash; CFS 运行队列</h4>
+<p class="file-path">linux-src/kernel/sched/sched.h : 651</p>
+<pre>
+<span class="keyword">struct</span> <span class="type">cfs_rq</span> {
+    <span class="keyword">struct</span> load_weight load;
+    <span class="keyword">unsigned int</span> nr_running;
+    u64  min_vruntime;  <span class="comment">// ★ 单调递增基线</span>
+    <span class="keyword">struct</span> rb_root_cached tasks_timeline;
+    <span class="comment">// ★ 红黑树按 vruntime 排序</span>
+    <span class="comment">// 最左叶 = vruntime 最小 = 最该被调度</span>
+    <span class="keyword">struct</span> sched_entity *curr;
+};
+</pre>
+</div>
+</div>
+
+<h4>schedule() 选任务的流程</h4>
+<p class="file-path">linux-src/kernel/sched/core.c : 6549 (__schedule)</p>
+<pre>
+<span class="keyword">static void</span> __sched notrace <span class="func">__schedule</span>(<span class="keyword">int</span> sched_mode)
+{
+    <span class="keyword">struct</span> task_struct *prev, *next;
+    <span class="keyword">struct</span> rq *rq = cpu_rq(smp_processor_id());
+    prev = rq->curr;
+
+    local_irq_disable();
+    rq_lock(rq, &amp;rf);
+    update_rq_clock(rq);
+
+    <span class="comment">// 如果 prev 正在阻塞 (非抢占)，将其移出运行队列</span>
+    <span class="keyword">if</span> (!preempt &amp;&amp; prev_state)
+        deactivate_task(rq, prev, flags);
+
+    <span class="comment">// ★ 选择下一个任务</span>
+    next = pick_next_task(rq, prev, &amp;rf);
+    <span class="comment">//   → fair_sched_class.pick_next_task()</span>
+    <span class="comment">//   → pick_task_fair() → 从红黑树取最左节点</span>
+
+    context_switch(rq, prev, next, &amp;rf);
+}
+</pre>
+
+<div class="card highlight-green" style="margin-top:12px;">
+<h4>CFS 公平性原理</h4>
+<pre>
+<strong>vruntime 计算：</strong>
+  delta = now - se.exec_start          // 实际运行时间增量
+  se.vruntime += delta * NICE_0_LOAD / se.load.weight
+
+  → 权重越高 (nice 值越低)，vruntime 增长越慢
+  → vruntime 最小的进程优先被调度
+
+<strong>红黑树示意：</strong>
+           [vr=50ms]
+          /         \
+     [vr=30ms]    [vr=70ms]
+      /
+  [vr=10ms] ← pick_next 总是选这里 (最左)
+
+<strong>新进程插入：</strong>
+  se.vruntime = cfs_rq.min_vruntime - sched_latency/2
+  → 保证新进程能快速获得 CPU，但不插队太多
+</pre>
+</div>
+
+<h3>2.1.2 内存保护</h3>
+<p>内核通过页表和权限检查确保进程无法越界访问。</p>
+
+<div class="cards-grid">
+<div class="card highlight-red">
+<h4>页表权限机制</h4>
+<pre>
+<strong>ARM64 四级页表 (4KB page):</strong>
+  PGD → PUD → PMD → PTE
+
+<strong>PTE 权限位：</strong>
+  AP[2:1]  → EL0 读/写权限
+  UXN/PXN  → 用户/特权执行禁止
+  AF       → Access Flag (必须置 1 才允许访问)
+
+<strong>mmap/mprotect 如何生效：</strong>
+  mmap(PROT_READ|PROT_WRITE)
+    → vma.vm_flags = VM_READ | VM_WRITE
+    → PTE: AP 允许 EL0 读写, PXN=1 (不可执行)
+
+  mprotect(addr, len, PROT_EXEC)
+    → 修改 VMA 的 vm_flags
+    → change_protection() → 遍历 PTE 修改权限位
+    → flush_tlb_range()
+</pre>
+</div>
+<div class="card highlight-red">
+<h4>用户/内核空间隔离</h4>
+<pre>
+<strong>ARM64 地址空间划分：</strong>
+  TTBR0_EL1 → 用户页表 (EL0 可见)
+  TTBR1_EL1 → 内核页表 (仅 EL1 可见)
+
+<strong>PAN (Privileged Access Never):</strong>
+  内核不能直接访问用户空间内存
+  → 必须用 copy_from_user() / copy_to_user()
+  → 这些函数临时禁用 PAN 或使用 LDTR/STTR
+
+<strong>KASLR + KPTI:</strong>
+  内核地址随机化 + 内核页表隔离
+  → 防止侧信道攻击泄露内核布局
+</pre>
+</div>
+</div>
+
+<h3>2.1.3 访问控制</h3>
+<div class="cards-grid">
+<div class="card highlight-red">
+<h4>Capabilities 能力模型</h4>
+<pre>
+<span class="comment">// 取代传统的 root/non-root 二分法</span>
+<span class="comment">// include/uapi/linux/capability.h</span>
+
+CAP_NET_BIND_SERVICE  <span class="comment">// 绑定 &lt;1024 端口</span>
+CAP_SYS_ADMIN         <span class="comment">// mount, setns, 多种管理操作</span>
+CAP_NET_RAW           <span class="comment">// 原始套接字</span>
+CAP_SYS_PTRACE        <span class="comment">// ptrace 其他进程</span>
+
+<span class="comment">// 检查时机：每个敏感系统调用入口处</span>
+<span class="keyword">if</span> (!capable(CAP_NET_BIND_SERVICE))
+    <span class="keyword">return</span> -EACCES;
+
+<span class="comment">// capable() → ns_capable() → cap_capable()</span>
+<span class="comment">//   → 检查 current->cred->cap_effective</span>
+</pre>
+</div>
+<div class="card highlight-red">
+<h4>Seccomp 系统调用过滤</h4>
+<pre>
+<span class="comment">// 进程可以安装 BPF 过滤器限制可调用的系统调用</span>
+prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &amp;prog);
+
+<span class="comment">// 在 el0_svc_common() 中被调用：</span>
+<span class="comment">// arch/arm64/kernel/syscall.c</span>
+<span class="keyword">if</span> (test_thread_flag(TIF_SECCOMP))
+    ret = __secure_computing(regs);
+    <span class="comment">// → seccomp_bpf_filter()</span>
+    <span class="comment">// → BPF 程序返回 ALLOW/DENY/KILL/TRACE</span>
+
+<span class="comment">// Docker 默认 seccomp profile 禁止 ~40 个危险 syscall</span>
+</pre>
+</div>
+</div>
+
+<!-- ==================== 2.2 STEWARD ==================== -->
+<h2 id="steward"><span class="tag tag-steward">Steward</span>2.2 管家 &mdash; 管理系统资源</h2>
+
+<h3>2.2.1 物理内存分配 &mdash; Buddy System + SLAB</h3>
+
+<div class="two-col">
+<div>
+<h4>Buddy System (伙伴系统)</h4>
+<p class="file-path">linux-src/mm/page_alloc.c</p>
+<p>管理物理页的核心分配器。将空闲页按 2^n 阶 (order) 分组管理。</p>
+
+<pre>
+<span class="comment">// 每个 zone 维护 MAX_ORDER+1 个 free_area</span>
+<span class="keyword">struct</span> <span class="type">free_area</span> {
+    <span class="keyword">struct</span> list_head free_list[MIGRATE_TYPES];
+    <span class="keyword">unsigned long</span> nr_free;
+};
+
+<span class="comment">// zone.free_area[0] → 4KB 空闲页链表</span>
+<span class="comment">// zone.free_area[1] → 8KB 空闲页链表</span>
+<span class="comment">// zone.free_area[2] → 16KB 空闲页链表</span>
+<span class="comment">// ...</span>
+<span class="comment">// zone.free_area[10] → 4MB 空闲页链表</span>
+</pre>
+
+<p class="file-path">linux-src/mm/page_alloc.c : 4717</p>
+<pre>
+<span class="keyword">struct</span> page *<span class="func">__alloc_pages_noprof</span>(gfp_t gfp,
+    <span class="keyword">unsigned int</span> order, <span class="keyword">int</span> nid, nodemask_t *mask)
+{
+    <span class="comment">// 快速路径: per-CPU list → zone free list</span>
+    page = get_page_from_freelist(gfp, order, flags, &amp;ac);
+    <span class="keyword">if</span> (likely(page)) <span class="keyword">goto</span> out;
+
+    <span class="comment">// 慢速路径: direct reclaim → compaction → OOM</span>
+    page = __alloc_pages_slowpath(gfp, order, &amp;ac);
+}
+</pre>
+</div>
+<div>
+<h4>Buddy 分裂与合并</h4>
+<pre>
+<strong>分配 order=2 (16KB) 时：</strong>
+  1. 查 free_area[2] → 空
+  2. 查 free_area[3] → 找到一个 32KB 块
+  3. 取出 32KB，分裂为两个 16KB
+  4. 一个放入 free_area[2]，另一个返回
+
+<strong>释放 order=2 时：</strong>
+  1. 找到 buddy (地址 XOR 0x4000)
+  2. buddy 也在 free_area[2]？
+     → 是: 合并为 order=3，继续向上检查
+     → 否: 放入 free_area[2]
+
+<strong>SLAB/SLUB 分配器 (kmalloc):</strong>
+  kmalloc(64)  → 从 size-64 cache 分配
+  kmalloc(256) → 从 size-256 cache 分配
+  kmalloc(8192)→ 直接走 buddy (order=1)
+
+  SLUB 在 buddy 之上提供小对象的高效分配
+  → 减少碎片，提高缓存局部性
+</pre>
+</div>
+</div>
+
+<h3>2.2.2 文件描述符分配</h3>
+<p class="file-path">linux-src/fs/file.c</p>
+<pre>
+<span class="comment">// get_unused_fd_flags() → alloc_fd() 核心逻辑</span>
+
+<span class="keyword">static int</span> <span class="func">alloc_fd</span>(<span class="keyword">unsigned</span> start, <span class="keyword">unsigned</span> end, <span class="keyword">unsigned</span> flags)
+{
+    <span class="keyword">struct</span> files_struct *files = current->files;
+    <span class="keyword">struct</span> fdtable *fdt;
+
+    spin_lock(&amp;files->file_lock);
+    fdt = files_fdtable(files);
+
+    <span class="comment">// 1. 用 full_fds_bits 跳过已满的 BITS_PER_LONG 区间</span>
+    <span class="comment">// 2. 用 open_fds 位图在目标区间找第一个 0 bit</span>
+    fd = find_next_zero_bit(fdt->open_fds, end, start);
+
+    <span class="comment">// 3. 如果需要扩容</span>
+    <span class="keyword">if</span> (fd >= fdt->max_fds)
+        expand_fdtable(files, fdt, fd);
+
+    <span class="comment">// 4. 标记为已使用</span>
+    __set_open_fd(fd, fdt);
+    <span class="keyword">if</span> (flags &amp; O_CLOEXEC)
+        __set_close_on_exec(fd, fdt);
+
+    spin_unlock(&amp;files->file_lock);
+    <span class="keyword">return</span> fd;
+}
+</pre>
+
+<h3>2.2.3 进程创建 &mdash; fork() → copy_process()</h3>
+<p class="file-path">linux-src/kernel/fork.c</p>
+
+<div class="flow-chain">
+  <span class="flow-node flow-user">fork() / clone()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-syscall">kernel_clone() :2764</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">copy_process() :2137</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-node flow-kernel">wake_up_new_task()</span>
+</div>
+
+<pre>
+<span class="keyword">struct</span> task_struct *<span class="func">copy_process</span>(<span class="keyword">struct</span> pid *pid, <span class="keyword">int</span> trace,
+                                <span class="keyword">int</span> node, <span class="keyword">struct</span> kernel_clone_args *args)
+{
+    <span class="comment">// ① 分配并复制 task_struct + 内核栈</span>
+    p = dup_task_struct(current, node);
+
+    <span class="comment">// ② 根据 clone flags 复制或共享各子系统</span>
+    retval = copy_creds(p, clone_flags);      <span class="comment">// 凭证</span>
+    retval = copy_files(clone_flags, p);      <span class="comment">// 文件描述符表</span>
+    retval = copy_fs(clone_flags, p);         <span class="comment">// cwd/root/umask</span>
+    retval = copy_signal(clone_flags, p);     <span class="comment">// 信号处理</span>
+    retval = copy_mm(clone_flags, p);         <span class="comment">// 地址空间 (COW!)</span>
+    retval = copy_namespaces(clone_flags, p); <span class="comment">// 命名空间</span>
+    retval = copy_thread(clone_flags, args->stack, args->tls, p); <span class="comment">// 架构相关</span>
+
+    <span class="comment">// ③ 分配 PID，加入进程树</span>
+    pid = alloc_pid(p->nsproxy->pid_ns_for_children, ...);
+    p->pid = pid_nr(pid);
+
+    <span class="comment">// ④ 初始化调度实体</span>
+    sched_fork(clone_flags, p);
+
+    <span class="keyword">return</span> p;
+}
+</pre>
+
+<div class="card highlight-orange" style="margin-top:12px;">
+<h4>CLONE 标志位决定共享还是复制</h4>
+<pre>
+CLONE_VM      → 共享 mm_struct (线程)     vs 复制 mm_struct (进程)
+CLONE_FILES   → 共享 files_struct (线程)  vs 复制 fd 表 (进程)
+CLONE_FS      → 共享 fs_struct            vs 复制 cwd/root
+CLONE_SIGHAND → 共享 sighand_struct       vs 复制信号处理表
+CLONE_THREAD  → 同一线程组 (要求 CLONE_VM + CLONE_SIGHAND)
+
+pthread_create() = clone(CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD)
+fork()           = clone(SIGCHLD)  (几乎全部复制)
+</pre>
+</div>
+
+<h3>2.2.4 网络缓冲区管理</h3>
+<div class="card highlight-orange">
+<h4>sk_buff 生命周期</h4>
+<pre>
+<strong>分配：</strong>
+  alloc_skb(size, GFP_ATOMIC)    ← 中断上下文
+  alloc_skb(size, GFP_KERNEL)    ← 进程上下文
+  → __alloc_skb() → kmem_cache_alloc(skbuff_head_cache)
+  → kmalloc(size) for data area
+
+<strong>接收路径：</strong>
+  网卡 DMA → page pool → build_skb() → napi_gro_receive()
+  → 放入 sk.sk_receive_queue → 唤醒用户进程
+
+<strong>发送路径：</strong>
+  sock_sendmsg() → tcp_sendmsg() → 从用户空间拷贝到 sk_buff
+  → 入 sk.sk_write_queue → qdisc_enqueue → dev_hard_start_xmit()
+
+<strong>缓冲区限制：</strong>
+  sk.sk_rcvbuf (SO_RCVBUF) → 接收队列总字节数上限
+  sk.sk_sndbuf (SO_SNDBUF) → 发送队列总字节数上限
+  net.core.rmem_max / wmem_max → 系统级上限
+  超限时丢包或阻塞 (取决于 SOCK_DGRAM / SOCK_STREAM)
+</pre>
+</div>
+
+<!-- ==================== 2.3 TRANSLATOR ==================== -->
+<h2 id="translator"><span class="tag tag-translator">Translator</span>2.3 翻译官 &mdash; 硬件抽象</h2>
+<p>内核最重要的价值之一：<strong>为上层提供统一接口，屏蔽底层硬件差异</strong>。</p>
+
+<h3>2.3.1 VFS &mdash; 一切皆文件的基石</h3>
+<p class="file-path">linux-src/fs/read_write.c : 663</p>
+
+<pre>
+<span class="keyword">ssize_t</span> <span class="func">vfs_write</span>(<span class="keyword">struct</span> file *file, <span class="keyword">const char</span> __user *buf,
+                  <span class="type">size_t</span> count, loff_t *pos)
+{
+    <span class="comment">// 权限检查</span>
+    <span class="keyword">if</span> (!(file->f_mode &amp; FMODE_WRITE))     <span class="keyword">return</span> -EBADF;
+    <span class="keyword">if</span> (!(file->f_mode &amp; FMODE_CAN_WRITE)) <span class="keyword">return</span> -EINVAL;
+
+    <span class="comment">// ★ 统一分发 — 不管是什么类型的文件</span>
+    <span class="keyword">if</span> (file->f_op->write)
+        ret = file->f_op->write(file, buf, count, pos);
+    <span class="keyword">else if</span> (file->f_op->write_iter)
+        ret = new_sync_write(file, buf, count, pos);
+
+    <span class="keyword">return</span> ret;
+}
+</pre>
+
+<div class="cards-grid">
+<div class="card highlight-blue">
+<h4>普通文件 (ext4)</h4>
+<pre>
+file.f_op = ext4_file_operations
+  .write_iter = ext4_file_write_iter
+    → ext4_buffered_write_iter
+      → generic_perform_write
+        → ext4_write_begin/end
+          → block_write_end
+            → submit_bh() → 块设备层
+</pre>
+</div>
+<div class="card highlight-blue">
+<h4>TCP Socket</h4>
+<pre>
+file.f_op = socket_file_ops
+  .write_iter = sock_write_iter
+    → sock_sendmsg
+      → inet_sendmsg
+        → tcp_sendmsg
+          → tcp_push
+            → tcp_write_xmit
+              → ip_output → dev_queue_xmit
+</pre>
+</div>
+<div class="card highlight-blue">
+<h4>Pipe</h4>
+<pre>
+file.f_op = pipefifo_fops
+  .write_iter = pipe_write
+    → 拷贝数据到 pipe_buffer (环形缓冲)
+    → wake_up_reader
+    → 如果管道满且非阻塞: -EAGAIN
+    → 如果管道满且阻塞: 睡眠等待
+</pre>
+</div>
+<div class="card highlight-blue">
+<h4>字符设备 (/dev/tty)</h4>
+<pre>
+file.f_op = tty_fops
+  .write_iter = tty_write
+    → tty_ldisc_write
+      → n_tty_write
+        → con_write / uart_write
+          → 串口/控制台驱动
+</pre>
+</div>
+</div>
+
+<h3>2.3.2 块设备层抽象</h3>
+<p>不同的存储设备对上层暴露统一的 <code class="inline-code">block_device</code> + <code class="inline-code">request_queue</code> 接口。</p>
+
+<div class="cards-grid">
+<div class="card highlight-purple">
+<h4>virtio-blk (QEMU 虚拟磁盘)</h4>
+<pre>
+<span class="comment">// drivers/block/virtio_blk.c</span>
+blk_mq_alloc_disk()
+  → virtio_blk_mq_ops.queue_rq
+    → virtblk_add_req()
+      → virtqueue_add_sgs()
+        → virtio 通知 host
+</pre>
+</div>
+<div class="card highlight-purple">
+<h4>NVMe SSD</h4>
+<pre>
+<span class="comment">// drivers/nvme/host/pci.c</span>
+nvme_alloc_admin_tag_set()
+  → nvme_queue_rq
+    → nvme_map_data()
+      → NVMe submission queue doorbell
+        → PCIe MMIO write
+</pre>
+</div>
+<div class="card highlight-purple">
+<h4>SATA/AHCI</h4>
+<pre>
+<span class="comment">// drivers/ata/libata-scsi.c</span>
+ata_scsi_queuecmd()
+  → ata_qc_issue
+    → ahci_qc_prep
+      → AHCI command list slot
+        → SATA FIS → 磁盘
+</pre>
+</div>
+</div>
+
+<p><strong>共同点：</strong>三者都通过 <code class="inline-code">blk_mq_ops.queue_rq()</code> 回调接入块层。文件系统只需调用 <code class="inline-code">submit_bio()</code>，无需关心底层是 virtio、NVMe 还是 SATA。</p>
+
+<h3>2.3.3 网络设备抽象</h3>
+<p class="file-path">linux-src/include/linux/netdevice.h</p>
+<p>所有网络设备实现 <code class="inline-code">struct net_device_ops</code>，内核网络栈通过统一接口操作它们。</p>
+
+<div class="cards-grid">
+<div class="card highlight-purple">
+<h4>virtio-net</h4>
+<pre>
+<span class="comment">// drivers/net/virtio_net.c</span>
+.ndo_start_xmit = start_xmit
+  → virtqueue_add_outbuf()
+  → virtqueue_notify()
+.ndo_open       = virtnet_open
+.ndo_get_stats64 = virtnet_stats
+<span class="comment">// 接收: virtio interrupt → NAPI → virtnet_poll</span>
+</pre>
+</div>
+<div class="card highlight-purple">
+<h4>e1000 (Intel NIC)</h4>
+<pre>
+<span class="comment">// drivers/net/ethernet/intel/e1000/e1000_main.c</span>
+.ndo_start_xmit = e1000_xmit_frame
+  → e1000_tx_map() → 写 TX descriptor ring
+  → writel(E1000_TDT)
+.ndo_open       = e1000_open
+<span class="comment">// 接收: MSI-X interrupt → e1000_clean_rx_irq</span>
+</pre>
+</div>
+<div class="card highlight-purple">
+<h4>r8169 (Realtek NIC)</h4>
+<pre>
+<span class="comment">// drivers/net/ethernet/realtek/r8169_main.c</span>
+.ndo_start_xmit = rtl8169_start_xmit
+  → rtl8169_tx_map() → 写 TX desc
+  → RTL_W16(TPPoll, NPQ)
+.ndo_open       = rtl_open
+<span class="comment">// 接收: MSI interrupt → rtl_rx → napi_schedule</span>
+</pre>
+</div>
+</div>
+
+<p><strong>共同点：</strong>三者都通过 <code class="inline-code">net_device_ops.ndo_start_xmit</code> 发包。IP 层调用 <code class="inline-code">dev_queue_xmit()</code>，经过 qdisc 后调用 <code class="inline-code">ops->ndo_start_xmit(skb, dev)</code>，不区分具体网卡型号。</p>
+
+<h3>2.3.4 字符设备抽象</h3>
+<p>所有字符设备通过 <code class="inline-code">struct file_operations</code> 提供统一接口。</p>
+
+<div class="cards-grid">
+<div class="card highlight-blue">
+<h4>/dev/null</h4>
+<pre>
+<span class="comment">// drivers/char/mem.c</span>
+<span class="keyword">static const struct</span> file_operations null_fops = {
+    .read  = read_null,   <span class="comment">// 返回 0 字节</span>
+    .write = write_null,  <span class="comment">// 丢弃所有数据，返回 count</span>
+    .llseek = noop_llseek,
+};
+</pre>
+</div>
+<div class="card highlight-blue">
+<h4>/dev/random</h4>
+<pre>
+<span class="comment">// drivers/char/random.c</span>
+<span class="keyword">static const struct</span> file_operations random_fops = {
+    .read  = random_read,   <span class="comment">// 从熵池读取随机数</span>
+    .write = random_write,  <span class="comment">// 向熵池注入熵</span>
+    .poll  = random_poll,   <span class="comment">// 熵足够时返回可读</span>
+    .ioctl = random_ioctl,
+};
+</pre>
+</div>
+<div class="card highlight-blue">
+<h4>/dev/tty</h4>
+<pre>
+<span class="comment">// drivers/tty/tty_io.c</span>
+<span class="keyword">static const struct</span> file_operations tty_fops = {
+    .read_iter  = tty_read,
+    .write_iter = tty_write,
+    .poll       = tty_poll,
+    .ioctl      = tty_ioctl,
+    .open       = tty_open,
+    .release    = tty_release,
+};
+</pre>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SUMMARY -->
+<!-- ============================================================ -->
+<div class="part-divider"></div>
+<h2>总结：两个视角的统一</h2>
+
+<div class="cards-grid">
+<div class="card highlight-green">
+<h4>视角一：内核 = 事件处理器 + 数据结构</h4>
+<pre>
+<strong>3 种事件入口：</strong>
+  ① System Call (svc) → sys_call_table[nr]
+  ② Interrupt (IRQ)   → gic_handle_irq → device ISR
+  ③ Exception (Fault) → do_page_fault → memory management
+
+<strong>7 个核心数据结构：</strong>
+  task_struct → mm_struct → files_struct → struct file
+                              ↕
+                         struct sock ↔ sk_buff
+                              ↕
+                         struct page
+</pre>
+</div>
+<div class="card highlight-orange">
+<h4>视角二：内核 = 裁判 + 管家 + 翻译官</h4>
+<pre>
+<strong>裁判 (Referee):</strong>
+  CFS 调度 (vruntime + RB-tree)
+  页表权限 (mmap/mprotect)
+  Capabilities + Seccomp
+
+<strong>管家 (Steward):</strong>
+  Buddy + SLAB (物理内存)
+  FD 位图 (文件描述符)
+  copy_process() (进程)
+  sk_buff 缓存 (网络缓冲)
+
+<strong>翻译官 (Translator):</strong>
+  VFS (file_operations)
+  Block Layer (blk_mq_ops)
+  Net Device (net_device_ops)
+  Char Device (file_operations)
+</pre>
+</div>
+</div>
+
+<div class="card" style="margin-top:20px; border-color: #58a6ff;">
+<h4 style="color:#58a6ff;">boot-naked-linux 实践联系</h4>
+<pre>
+在本项目中，你编写的 init.c 就是一个用户空间程序，它通过系统调用与内核交互：
+  • write(1, msg, len) → svc #0 → sys_call_table[__NR_write] → vfs_write()
+  • socket/connect/send → 网络栈全链路
+  • 当 init 访问未映射地址 → do_page_fault → demand paging
+
+QEMU 模拟的 virtio-net/virtio-blk 展示了翻译官角色的实际效果：
+  你的 init.c 不需要知道网卡是 virtio-net 还是 e1000，
+  只需要 connect()/send()/recv()，内核负责翻译。
+
+调试时 (.gdbinit + VSCode launch.json) 可以在上述任何函数上设断点，
+观察数据结构的变化和事件处理的完整流程。
+</pre>
+</div>
+
+<p style="margin-top:30px; color:#484f58; font-size:12px; text-align:center;">
+Generated for boot-naked-linux educational project &mdash; Linux kernel source references based on mainline v6.x
+</p>
+
+</div>
+</body>
+</html>

@@ -11,6 +11,7 @@
 > 基于 [Boot a Naked Linux](https://nick.zoic.org/art/boot-naked-linux/)，支持 macOS / Linux / Windows (WSL)，x86_64 和 arm64 架构。
 >
 > 📊 [网络 I/O 模型调用链路对比图](https://100apps.github.io/boot-naked-linux/network-io-models.html)
+> 🧠 [内核本质理解：事件处理器 + 数据结构 | 裁判 + 管家 + 翻译官](https://100apps.github.io/boot-naked-linux/kernel-concepts.html)
 
 ---
 
@@ -584,6 +585,7 @@ boot-naked-linux/
 ├── Dockerfile              Docker 构建文件（支持 arm64/amd64）
 ├── .gdbinit                GDB 初始化（路径映射 + init 符号加载 + 所有模型断点）
 ├── network-io-models.html  网络 I/O 模型调用链路对比图
+├── kernel-concepts.html    内核本质理解（事件处理器 + 数据结构 | 裁判 + 管家 + 翻译官）
 ├── scripts/
 │   ├── platform.sh         平台检测（OS/架构/QEMU/GDB 自动配置）
 │   ├── gdb-wrapper.sh      GDB 包装器（VSCode 用，自动选择正确的 GDB）
